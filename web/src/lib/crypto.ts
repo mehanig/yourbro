@@ -95,3 +95,62 @@ export function base64RawUrlEncode(bytes: Uint8Array): string {
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 }
+
+/** Standard base64 encode (with padding). */
+export function base64StdEncode(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+/**
+ * Send an RFC 9421 signed HTTP request to an agent endpoint.
+ * Uses the browser's Ed25519 keypair from IndexedDB.
+ */
+export async function signedFetch(
+  method: string,
+  url: string,
+  body?: string
+): Promise<Response> {
+  const { privateKey, publicKeyBytes } = await getOrCreateKeypair();
+  const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
+  const created = Math.floor(Date.now() / 1000);
+  const nonce = crypto.randomUUID();
+
+  // Content-Digest for body (RFC 9530)
+  let contentDigest = "";
+  if (body) {
+    const hash = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(body)
+    );
+    contentDigest = `sha-256=:${base64StdEncode(new Uint8Array(hash))}:`;
+  }
+
+  // RFC 9421 signature base
+  const coveredComponents = body
+    ? '("@method" "@target-uri" "content-digest")'
+    : '("@method" "@target-uri")';
+  const sigParams = `${coveredComponents};created=${created};nonce="${nonce}";keyid="${pubKeyB64}"`;
+
+  const lines: string[] = [
+    `"@method": ${method}`,
+    `"@target-uri": ${url}`,
+  ];
+  if (contentDigest) lines.push(`"content-digest": ${contentDigest}`);
+  lines.push(`"@signature-params": ${sigParams}`);
+  const signatureBase = lines.join("\n");
+
+  const sig = await crypto.subtle.sign(
+    "Ed25519",
+    privateKey,
+    new TextEncoder().encode(signatureBase)
+  );
+  const sigB64 = base64StdEncode(new Uint8Array(sig));
+
+  const headers: Record<string, string> = {
+    "Signature-Input": `sig1=${sigParams}`,
+    Signature: `sig1=:${sigB64}:`,
+  };
+  if (contentDigest) headers["Content-Digest"] = contentDigest;
+
+  return fetch(url, { method, headers, body });
+}

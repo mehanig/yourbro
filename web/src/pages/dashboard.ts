@@ -13,7 +13,7 @@ import {
   type Token,
   type Agent,
 } from "../lib/api";
-import { getOrCreateKeypair, base64RawUrlEncode } from "../lib/crypto";
+import { getOrCreateKeypair, base64RawUrlEncode, signedFetch } from "../lib/crypto";
 
 function renderAgentsList(agents: Agent[], container: HTMLElement) {
   const listEl = container.querySelector("#agents-list");
@@ -33,7 +33,7 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
                 <span style="color:#666;margin-left:0.5rem;font-size:0.85rem;">${a.endpoint}</span>
               </div>
             </div>
-            <button class="delete-agent" data-id="${a.id}" style="padding:0.3rem 0.6rem;background:#300;border:1px solid #500;color:#f88;border-radius:4px;cursor:pointer;font-size:0.8rem;">Remove</button>
+            <button class="delete-agent" data-id="${a.id}" data-endpoint="${a.endpoint}" style="padding:0.3rem 0.6rem;background:#300;border:1px solid #500;color:#f88;border-radius:4px;cursor:pointer;font-size:0.8rem;">Remove</button>
           </div>
         `
           )
@@ -43,10 +43,27 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
   listEl.querySelectorAll(".delete-agent").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = Number((btn as HTMLElement).dataset.id);
-      if (confirm("Remove this agent?")) {
-        await deleteAgent(id);
-        renderDashboard(container);
+      const endpoint = (btn as HTMLElement).dataset.endpoint;
+      if (!confirm("Remove this agent?")) return;
+
+      // Step 1: Revoke key on agent — must succeed before removing server record
+      if (endpoint) {
+        try {
+          const res = await signedFetch("DELETE", `${endpoint}/api/keys`);
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({ error: res.statusText }));
+            alert(`Can't unpair: ${data.error || res.statusText}`);
+            return;
+          }
+        } catch {
+          alert("Can't unpair: agent is offline or unreachable.\nTry again when the agent is back online.");
+          return;
+        }
       }
+
+      // Step 2: Agent confirmed revocation — now safe to remove from server
+      await deleteAgent(id);
+      renderDashboard(container);
     });
   });
 }

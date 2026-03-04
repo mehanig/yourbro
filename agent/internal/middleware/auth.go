@@ -18,11 +18,22 @@ import (
 
 type contextKey string
 
-const usernameKey contextKey = "username"
+const (
+	usernameKey  contextKey = "username"
+	publicKeyKey contextKey = "public_key"
+)
 
 // GetUsername returns the authenticated username from context.
 func GetUsername(r *http.Request) string {
 	if v, ok := r.Context().Value(usernameKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// GetPublicKey returns the authenticated public key (base64url) from context.
+func GetPublicKey(r *http.Request) string {
+	if v, ok := r.Context().Value(publicKeyKey).(string); ok {
 		return v
 	}
 	return ""
@@ -208,8 +219,9 @@ func VerifyUserSignature(store *storage.DB) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Set username in context
+			// Set username and public key in context
 			ctx := context.WithValue(r.Context(), usernameKey, username)
+			ctx = context.WithValue(ctx, publicKeyKey, keyID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

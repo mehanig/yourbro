@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mehanig/yourbro/agent/internal/middleware"
 	"github.com/mehanig/yourbro/agent/internal/storage"
 )
 
@@ -94,4 +95,21 @@ func (h *PairHandler) Pair(w http.ResponseWriter, r *http.Request) {
 	h.used = true
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "paired"})
+}
+
+// RevokeKey handles DELETE /api/keys — removes the signing key from authorized_keys.
+// Protected by VerifyUserSignature middleware, so only the key owner can revoke their own key.
+func (h *PairHandler) RevokeKey(w http.ResponseWriter, r *http.Request) {
+	publicKey := middleware.GetPublicKey(r)
+	if publicKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no public key in context"})
+		return
+	}
+
+	if err := h.DB.DeleteAuthorizedKey(publicKey); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to revoke key"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }

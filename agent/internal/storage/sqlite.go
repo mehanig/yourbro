@@ -76,6 +76,14 @@ func (d *DB) IsKeyAuthorized(publicKey string) (string, bool) {
 	return username, ok
 }
 
+func (d *DB) DeleteAuthorizedKey(publicKey string) error {
+	_, err := d.db.Exec(`DELETE FROM authorized_keys WHERE public_key = ?`, publicKey)
+	if err != nil {
+		return err
+	}
+	return d.reloadAuthKeys()
+}
+
 func (d *DB) reloadAuthKeys() error {
 	rows, err := d.db.Query(`SELECT public_key, username FROM authorized_keys`)
 	if err != nil {

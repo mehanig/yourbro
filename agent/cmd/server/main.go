@@ -60,6 +60,12 @@ func main() {
 	// Pairing endpoint (no auth — pairing code IS the auth)
 	r.Post("/api/pair", pairHandler.Pair)
 
+	// Key revocation (require user signature — RFC 9421)
+	r.Route("/api/keys", func(r chi.Router) {
+		r.Use(mw.VerifyUserSignature(db))
+		r.Delete("/", pairHandler.RevokeKey)
+	})
+
 	// Storage routes (require user signature — RFC 9421)
 	r.Route("/api/storage/{slug}", func(r chi.Router) {
 		r.Use(mw.VerifyUserSignature(db))
