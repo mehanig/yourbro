@@ -39,6 +39,16 @@ type PublicKey struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type Agent struct {
+	ID            int64      `json:"id"`
+	UserID        int64      `json:"user_id"`
+	Name          string     `json:"name"`
+	Endpoint      string     `json:"endpoint"`
+	LastHeartbeat *time.Time `json:"last_heartbeat"`
+	PairedAt      time.Time  `json:"paired_at"`
+	IsOnline      bool       `json:"is_online"`
+}
+
 // API request/response types
 
 type CreatePageRequest struct {
@@ -63,6 +73,15 @@ type CreateTokenResponse struct {
 	Token string `json:"token"`
 	Name  string `json:"name"`
 	ID    int64  `json:"id"`
+}
+
+type RegisterAgentRequest struct {
+	Endpoint string `json:"endpoint"`
+	Name     string `json:"name"`
+}
+
+type HeartbeatRequest struct {
+	Endpoint string `json:"endpoint"`
 }
 
 type OAuthCallbackResponse struct {

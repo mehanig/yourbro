@@ -110,6 +110,9 @@ func main() {
 		SDKScript: sdkScript,
 	}
 	keysHandler := &handlers.KeysHandler{DB: db}
+	sseBroker := handlers.NewSSEBroker(db)
+	sseBroker.StartStaleChecker(context.Background())
+	agentsHandler := &handlers.AgentsHandler{DB: db, Broker: sseBroker}
 
 	r := chi.NewRouter()
 
@@ -275,6 +278,15 @@ func main() {
 			r.With(middleware.RequireScope("read:pages")).Get("/{id}", pagesHandler.Get)
 			r.With(middleware.RequireScope("read:pages")).Get("/{id}/content-meta", pagesHandler.ContentMeta)
 			r.Delete("/{id}", pagesHandler.Delete)
+		})
+
+		// Agents
+		r.Route("/agents", func(r chi.Router) {
+			r.Post("/", agentsHandler.Register)
+			r.Get("/", agentsHandler.List)
+			r.Delete("/{id}", agentsHandler.Delete)
+			r.Post("/heartbeat", agentsHandler.Heartbeat)
+			r.Get("/stream", sseBroker.ServeHTTP)
 		})
 
 		// Public Keys

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -67,6 +68,17 @@ func main() {
 		r.Put("/{key}", storageHandler.Set)
 		r.Delete("/{key}", storageHandler.Delete)
 	})
+
+	// Start heartbeat if API token and server URL are configured
+	apiToken := os.Getenv("YB_API_TOKEN")
+	serverURL := os.Getenv("YB_SERVER_URL")
+	agentEndpoint := os.Getenv("YB_AGENT_ENDPOINT") // how the server knows this agent
+	if apiToken != "" && serverURL != "" && agentEndpoint != "" {
+		startHeartbeat(serverURL, apiToken, agentEndpoint)
+		log.Printf("Heartbeat started → %s (every 60s)", serverURL)
+	} else if apiToken != "" || serverURL != "" {
+		log.Printf("WARNING: Set YB_API_TOKEN, YB_SERVER_URL, and YB_AGENT_ENDPOINT to enable heartbeat")
+	}
 
 	if domain != "" {
 		// Production: autocert TLS
@@ -132,6 +144,33 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func startHeartbeat(serverURL, apiToken, endpoint string) {
+	serverURL = strings.TrimRight(serverURL, "/")
+	send := func() {
+		body := strings.NewReader(fmt.Sprintf(`{"endpoint":%q}`, endpoint))
+		req, err := http.NewRequest("POST", serverURL+"/api/agents/heartbeat", body)
+		if err != nil {
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+apiToken)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Printf("Heartbeat failed: %v", err)
+			return
+		}
+		resp.Body.Close()
+	}
+	send() // immediate first heartbeat
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			send()
+		}
+	}()
 }
 
 const pairingChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"

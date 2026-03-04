@@ -19,9 +19,8 @@ services:
       - "${AGENT_PORT:-9443}:${AGENT_PORT:-9443}"
     volumes:
       - agent-data:/data
-    environment:
-      AGENT_PORT: ${AGENT_PORT:-9443}
-      SQLITE_PATH: /data/agent.db
+    env_file:
+      - ./agent/.env
     networks:
       - yourbro
     profiles:

@@ -23,6 +23,12 @@ func RequireAuth(db *storage.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			header := r.Header.Get("Authorization")
+			// Support ?token= query param for EventSource (SSE) which can't set headers
+			if header == "" {
+				if t := r.URL.Query().Get("token"); t != "" {
+					header = "Bearer " + t
+				}
+			}
 			if header == "" {
 				http.Error(w, `{"error":"missing authorization header"}`, http.StatusUnauthorized)
 				return
