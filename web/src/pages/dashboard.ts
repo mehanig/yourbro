@@ -145,9 +145,8 @@ export async function renderDashboard(container: HTMLElement) {
     </section>
   `;
 
-  // SSE for real-time agent status
-  const token = localStorage.getItem("yb_session");
-  const evtSource = new EventSource(`/api/agents/stream?token=${encodeURIComponent(token || "")}`);
+  // SSE for real-time agent status (cookie-based auth, no token in URL)
+  const evtSource = new EventSource("/api/agents/stream");
   evtSource.onmessage = (event) => {
     try {
       const agents: Agent[] = JSON.parse(event.data);
@@ -171,8 +170,9 @@ export async function renderDashboard(container: HTMLElement) {
   window.addEventListener("hashchange", cleanup);
 
   // Event handlers
-  document.getElementById("logout-btn")?.addEventListener("click", () => {
+  document.getElementById("logout-btn")?.addEventListener("click", async () => {
     evtSource.close();
+    await fetch("/api/logout", { method: "POST" });
     clearToken();
     window.location.hash = "#/login";
     window.location.reload();

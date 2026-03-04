@@ -23,10 +23,10 @@ func RequireAuth(db *storage.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			header := r.Header.Get("Authorization")
-			// Support ?token= query param for EventSource (SSE) which can't set headers
+			// Fallback to httpOnly cookie for SSE (EventSource can't set headers)
 			if header == "" {
-				if t := r.URL.Query().Get("token"); t != "" {
-					header = "Bearer " + t
+				if cookie, err := r.Cookie("yb_session"); err == nil {
+					header = "Bearer " + cookie.Value
 				}
 			}
 			if header == "" {

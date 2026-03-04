@@ -181,12 +181,36 @@ func main() {
 			return
 		}
 
+		// Set httpOnly session cookie (used by SSE EventSource which can't set headers)
+		http.SetCookie(w, &http.Cookie{
+			Name:     "yb_session",
+			Value:    token,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   os.Getenv("AGENT_DOMAIN") != "", // true in production (HTTPS)
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   7 * 24 * 60 * 60, // 7 days, matches JWT expiry
+		})
+
 		http.Redirect(w, r, frontendURL+"/#/callback?token="+token, http.StatusTemporaryRedirect)
 	})
 
 	// Public page rendering
 	r.Get("/p/{username}/{slug}", pagesHandler.RenderPage)
 	r.Get("/api/pages/{id}/content", pagesHandler.RenderPageContent)
+
+	// Logout — clears httpOnly session cookie (no auth required)
+	r.Post("/api/logout", func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "yb_session",
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			MaxAge:   -1,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	})
 
 	// Authenticated API routes
 	r.Route("/api", func(r chi.Router) {
