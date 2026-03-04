@@ -1,4 +1,4 @@
-.PHONY: dev api web sdk db migrate clean build-agent
+.PHONY: dev api web sdk db migrate clean build-agent test test-agent test-web
 
 # Start everything for local dev
 dev: db api web
@@ -46,6 +46,17 @@ install: install-web install-sdk
 # Build agent server binary
 build-agent:
 	cd agent && CGO_ENABLED=1 go build -o ../bin/agent-server ./cmd/server
+
+# Run all tests
+test: test-agent test-web
+
+# Run Go agent tests
+test-agent:
+	cd agent && go test ./...
+
+# Run TypeScript web tests
+test-web:
+	cd web && npx vitest run
 
 # Clean build artifacts
 clean:

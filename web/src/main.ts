@@ -1,11 +1,18 @@
 import { isLoggedIn, setToken } from "./lib/api";
 import { renderLogin } from "./pages/login";
 import { renderDashboard } from "./pages/dashboard";
+import { renderHowToUse } from "./pages/how-to-use";
 
 const app = document.getElementById("app")!;
 
 function route() {
   const hash = window.location.hash;
+
+  // Public routes (no auth required)
+  if (hash === "#/how-to-use") {
+    renderHowToUse(app);
+    return;
+  }
 
   // Handle OAuth callback
   if (hash.startsWith("#/callback")) {

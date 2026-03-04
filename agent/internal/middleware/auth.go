@@ -1,10 +1,13 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"regexp"
@@ -158,6 +161,33 @@ func VerifyUserSignature(store *storage.DB) func(http.Handler) http.Handler {
 			if nonces.seen(nonce) {
 				http.Error(w, `{"error":"nonce already used (replay detected)"}`, http.StatusUnauthorized)
 				return
+			}
+
+			// Verify Content-Digest if it's a covered component
+			for _, comp := range covered {
+				if comp == "content-digest" {
+					digestHeader := r.Header.Get("Content-Digest")
+					if digestHeader == "" {
+						http.Error(w, `{"error":"content-digest header required but missing"}`, http.StatusBadRequest)
+						return
+					}
+					// Read and buffer body
+					bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
+					if err != nil {
+						http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
+						return
+					}
+					r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+					// Compute expected Content-Digest
+					hash := sha256.Sum256(bodyBytes)
+					expected := fmt.Sprintf("sha-256=:%s:", base64.StdEncoding.EncodeToString(hash[:]))
+					if digestHeader != expected {
+						http.Error(w, `{"error":"content-digest mismatch"}`, http.StatusBadRequest)
+						return
+					}
+					break
+				}
 			}
 
 			// Reconstruct signature base per RFC 9421
