@@ -1,0 +1,21 @@
+node_modules/
+dist/
+bin/
+.env
+*.local
+.DS_Store
+web/dist/
+sdk/dist/
+api/server
+
+# Embed directories (populated by Dockerfile, placeholders kept in git)
+api/cmd/server/static/*
+!api/cmd/server/static/index.html
+api/cmd/server/migrations/*
+!api/cmd/server/migrations/000_placeholder.sql
+
+# Secrets
+*.key
+*.pem
+test-private.*
+agent/server

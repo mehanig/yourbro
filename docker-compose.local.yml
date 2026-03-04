@@ -1,0 +1,31 @@
+services:
+  nginx:
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+
+  api:
+    environment:
+      FRONTEND_URL: http://localhost
+      GOOGLE_REDIRECT_URL: http://localhost/auth/google/callback
+      ALLOW_HTTP_AGENT: "true"
+
+  agent-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    ports:
+      - "${AGENT_PORT:-9443}:${AGENT_PORT:-9443}"
+    volumes:
+      - agent-data:/data
+    environment:
+      AGENT_PORT: ${AGENT_PORT:-9443}
+      SQLITE_PATH: /data/agent.db
+    networks:
+      - yourbro
+    profiles:
+      - agent
+
+volumes:
+  agent-data:

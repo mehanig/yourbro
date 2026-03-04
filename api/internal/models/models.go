@@ -1,0 +1,78 @@
+package models
+
+import "time"
+
+type User struct {
+	ID        int64     `json:"id"`
+	GoogleID  string    `json:"google_id"`
+	Email     string    `json:"email"`
+	Username  string    `json:"username"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Token struct {
+	ID        int64     `json:"id"`
+	UserID    int64     `json:"user_id"`
+	TokenHash string    `json:"-"`
+	Name      string    `json:"name"`
+	Scopes    []string  `json:"scopes"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Page struct {
+	ID            int64     `json:"id"`
+	UserID        int64     `json:"user_id"`
+	Slug          string    `json:"slug"`
+	Title         string    `json:"title"`
+	HTMLContent   string    `json:"html_content,omitempty"`
+	AgentEndpoint *string   `json:"agent_endpoint,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type PublicKey struct {
+	ID        int64     `json:"id"`
+	UserID    int64     `json:"user_id"`
+	Name      string    `json:"name"`
+	PublicKey string    `json:"public_key"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// API request/response types
+
+type CreatePageRequest struct {
+	Slug          string `json:"slug"`
+	Title         string `json:"title"`
+	HTMLContent   string `json:"html_content"`
+	AgentEndpoint string `json:"agent_endpoint,omitempty"`
+}
+
+type CreatePublicKeyRequest struct {
+	Name      string `json:"name"`
+	PublicKey string `json:"public_key"`
+}
+
+type CreateTokenRequest struct {
+	Name      string   `json:"name"`
+	Scopes    []string `json:"scopes"`
+	ExpiresIn int      `json:"expires_in_days"`
+}
+
+type CreateTokenResponse struct {
+	Token string `json:"token"`
+	Name  string `json:"name"`
+	ID    int64  `json:"id"`
+}
+
+type OAuthCallbackResponse struct {
+	SessionToken string `json:"session_token"`
+	User         User   `json:"user"`
+}
+
+// ValidScopes defines allowed token scopes.
+var ValidScopes = map[string]bool{
+	"publish:pages": true,
+	"read:pages":    true,
+	"manage:keys":   true,
+}

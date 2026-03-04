@@ -1,0 +1,1 @@
+-- placeholder for go:embed (real migrations are copied during Docker build)
