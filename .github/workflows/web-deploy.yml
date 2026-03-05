@@ -112,7 +112,6 @@ jobs:
                   "description": "Route /p/ pages to API server",
                   "action": "route",
                   "action_parameters": {
-                    "host_header": "api.yourbro.ai",
                     "origin": {
                       "host": "api.yourbro.ai",
                       "port": 443
