@@ -57,12 +57,18 @@ func (c *Client) Run(ctx context.Context) {
 	maxBackoff := 60 * time.Second
 
 	for {
+		connStart := time.Now()
 		err := c.connect(ctx)
 		if ctx.Err() != nil {
 			return
 		}
 		if err != nil {
 			log.Printf("WebSocket disconnected: %v", err)
+		}
+
+		// Reset backoff if connection lived long enough (not an immediate failure)
+		if time.Since(connStart) > 30*time.Second {
+			backoff = time.Second
 		}
 
 		// Exponential backoff with 10% jitter
@@ -107,7 +113,24 @@ func (c *Client) connect(ctx context.Context) error {
 
 	log.Printf("Connected to relay server: %s", wsURL)
 
-	// Reset backoff on successful connection (caller handles this by resetting)
+	// Start keepalive pings (Cloudflare drops idle WS after ~100s)
+	pingCtx, pingCancel := context.WithCancel(ctx)
+	defer pingCancel()
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := conn.Ping(pingCtx); err != nil {
+					log.Printf("Ping failed: %v", err)
+					return
+				}
+			case <-pingCtx.Done():
+				return
+			}
+		}
+	}()
 
 	// Read loop
 	for {

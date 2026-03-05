@@ -115,6 +115,16 @@ func main() {
 		log.Printf("E2E encryption enabled (X25519 pub: %x...)", identity.X25519PublicKey.Bytes()[:8])
 	}
 
+	// Auto-regenerate pairing code every 5 minutes
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			code := pairHandler.Regenerate(generatePairingCode)
+			log.Printf("=== PAIRING CODE: %s (expires in 5 minutes) ===", code)
+		}
+	}()
+
 	router := &relay.Router{Mux: r, CipherCache: cipherCache, DB: db}
 	client := &relay.Client{
 		ServerURL: serverURL,
