@@ -561,7 +561,7 @@ Two env vars instead of five. No domain, no port, no TLS.
 - [x] Agent reconnects automatically on WebSocket disconnect (exponential backoff)
 - [x] Nginx configured for WebSocket upgrade on `/ws/agent`
 - [x] Relay endpoint accepts Bearer token auth (not just cookies)
-- [ ] SKILL.md updated with relay-mode setup instructions (follow-up)
+- [x] SKILL.md updated with relay-mode setup instructions
 
 ### Non-Functional Requirements
 
