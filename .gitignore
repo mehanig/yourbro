@@ -2,6 +2,7 @@ node_modules/
 dist/
 bin/
 .env
+agent-prod.env
 *.local
 .DS_Store
 web/dist/
