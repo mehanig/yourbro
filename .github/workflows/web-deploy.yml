@@ -34,7 +34,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          aws s3 sync web/dist s3://yourbro-web/${{ env.BUILD_PATH }} \
+          aws s3 sync web/dist s3://yourbro/${{ env.BUILD_PATH }} \
             --endpoint-url https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com \
             --region auto
 
