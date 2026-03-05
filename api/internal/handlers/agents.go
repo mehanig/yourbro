@@ -14,6 +14,7 @@ import (
 type AgentsHandler struct {
 	DB     *storage.DB
 	Broker *SSEBroker
+	Hub    interface{ IsOnline(int64) bool } // relay.Hub
 }
 
 func (h *AgentsHandler) Register(w http.ResponseWriter, r *http.Request) {
@@ -25,12 +26,12 @@ func (h *AgentsHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Endpoint == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "endpoint is required"})
-		return
+	var endpoint *string
+	if req.Endpoint != "" {
+		endpoint = &req.Endpoint
 	}
 
-	agent, err := h.DB.CreateAgent(r.Context(), userID, req.Name, req.Endpoint)
+	agent, err := h.DB.CreateAgent(r.Context(), userID, req.Name, endpoint)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to register agent"})
 		return
@@ -49,6 +50,15 @@ func (h *AgentsHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if agents == nil {
 		agents = []models.Agent{}
+	}
+
+	// Relay-mode agents: check WebSocket hub for online status
+	if h.Hub != nil {
+		for i := range agents {
+			if agents[i].Endpoint == nil {
+				agents[i].IsOnline = h.Hub.IsOnline(agents[i].ID)
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, agents)

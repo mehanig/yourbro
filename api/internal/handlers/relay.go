@@ -1,0 +1,73 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/mehanig/yourbro/api/internal/middleware"
+	"github.com/mehanig/yourbro/api/internal/models"
+	"github.com/mehanig/yourbro/api/internal/relay"
+)
+
+type RelayHandler struct {
+	Hub *relay.Hub
+}
+
+// Relay handles POST /api/relay/{agent_id} — forwards a request to an agent via WebSocket.
+func (h *RelayHandler) Relay(w http.ResponseWriter, r *http.Request) {
+	agentID, err := strconv.ParseInt(chi.URLParam(r, "agent_id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent_id"})
+		return
+	}
+
+	userID := middleware.GetUserID(r)
+
+	// Verify the user owns this agent
+	agent, err := h.Hub.DB.GetAgentByID(r.Context(), agentID)
+	if err != nil || agent.UserID != userID {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent not found"})
+		return
+	}
+
+	// Check agent is connected
+	if !h.Hub.IsOnline(agentID) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "agent offline"})
+		return
+	}
+
+	// Parse relay request
+	var req models.RelayRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if req.ID == "" || req.Method == "" || req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id, method, and path are required"})
+		return
+	}
+
+	// Forward to agent with 5s timeout
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	resp, err := h.Hub.SendRequest(ctx, agentID, req)
+	if err != nil {
+		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "relay timeout or agent error"})
+		return
+	}
+
+	// Forward agent response headers
+	for k, v := range resp.Headers {
+		w.Header().Set(k, v)
+	}
+	w.WriteHeader(resp.Status)
+	if resp.Body != nil {
+		w.Write([]byte(*resp.Body))
+	}
+}

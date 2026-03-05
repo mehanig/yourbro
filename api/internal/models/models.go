@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type User struct {
 	ID        int64     `json:"id"`
@@ -43,7 +46,7 @@ type Agent struct {
 	ID            int64      `json:"id"`
 	UserID        int64      `json:"user_id"`
 	Name          string     `json:"name"`
-	Endpoint      string     `json:"endpoint"`
+	Endpoint      *string    `json:"endpoint"`
 	LastHeartbeat *time.Time `json:"last_heartbeat"`
 	PairedAt      time.Time  `json:"paired_at"`
 	IsOnline      bool       `json:"is_online"`
@@ -78,6 +81,29 @@ type CreateTokenResponse struct {
 type RegisterAgentRequest struct {
 	Endpoint string `json:"endpoint"`
 	Name     string `json:"name"`
+}
+
+type RelayRequest struct {
+	ID      string            `json:"id"`
+	Method  string            `json:"method"`
+	Path    string            `json:"path"`
+	Headers map[string]string `json:"headers"`
+	Body    *string           `json:"body"`
+}
+
+type RelayResponse struct {
+	ID      string            `json:"id"`
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers"`
+	Body    *string           `json:"body"`
+}
+
+// WireMessage is the WebSocket wire protocol envelope.
+type WireMessage struct {
+	Version int    `json:"v"`
+	Type    string `json:"type"` // "request" or "response"
+	ID      string `json:"id"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 type HeartbeatRequest struct {

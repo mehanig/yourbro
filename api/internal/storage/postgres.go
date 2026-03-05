@@ -247,14 +247,25 @@ func (db *DB) GetUserByPublicKey(ctx context.Context, publicKey string) (*models
 
 // Agents
 
-func (db *DB) CreateAgent(ctx context.Context, userID int64, name, endpoint string) (*models.Agent, error) {
+func (db *DB) CreateAgent(ctx context.Context, userID int64, name string, endpoint *string) (*models.Agent, error) {
 	var a models.Agent
-	err := db.Pool.QueryRow(ctx, `
-		INSERT INTO agents (user_id, name, endpoint)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (user_id, endpoint) DO UPDATE SET name = $2
-		RETURNING id, user_id, name, endpoint, last_heartbeat, paired_at
-	`, userID, name, endpoint).Scan(&a.ID, &a.UserID, &a.Name, &a.Endpoint, &a.LastHeartbeat, &a.PairedAt)
+	var err error
+	if endpoint != nil && *endpoint != "" {
+		// Direct-mode agent with endpoint — upsert on (user_id, endpoint)
+		err = db.Pool.QueryRow(ctx, `
+			INSERT INTO agents (user_id, name, endpoint)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (user_id, endpoint) WHERE endpoint IS NOT NULL DO UPDATE SET name = $2
+			RETURNING id, user_id, name, endpoint, last_heartbeat, paired_at
+		`, userID, name, *endpoint).Scan(&a.ID, &a.UserID, &a.Name, &a.Endpoint, &a.LastHeartbeat, &a.PairedAt)
+	} else {
+		// Relay-mode agent — always insert (no endpoint to conflict on)
+		err = db.Pool.QueryRow(ctx, `
+			INSERT INTO agents (user_id, name, endpoint)
+			VALUES ($1, $2, NULL)
+			RETURNING id, user_id, name, endpoint, last_heartbeat, paired_at
+		`, userID, name).Scan(&a.ID, &a.UserID, &a.Name, &a.Endpoint, &a.LastHeartbeat, &a.PairedAt)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -301,6 +312,47 @@ func (db *DB) UpdateHeartbeat(ctx context.Context, userID int64, endpoint string
 		return fmt.Errorf("agent not found")
 	}
 	return nil
+}
+
+func (db *DB) UpdateHeartbeatByID(ctx context.Context, agentID int64) error {
+	tag, err := db.Pool.Exec(ctx, `
+		UPDATE agents SET last_heartbeat = NOW()
+		WHERE id = $1
+	`, agentID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("agent not found")
+	}
+	return nil
+}
+
+func (db *DB) GetAgentByID(ctx context.Context, id int64) (*models.Agent, error) {
+	var a models.Agent
+	err := db.Pool.QueryRow(ctx, `
+		SELECT id, user_id, name, endpoint, last_heartbeat, paired_at
+		FROM agents WHERE id = $1
+	`, id).Scan(&a.ID, &a.UserID, &a.Name, &a.Endpoint, &a.LastHeartbeat, &a.PairedAt)
+	if err != nil {
+		return nil, err
+	}
+	a.IsOnline = a.LastHeartbeat != nil && time.Since(*a.LastHeartbeat) < 2*time.Minute
+	return &a, nil
+}
+
+// GetAgentByUserAndName finds an agent by user ID and name (for relay-mode registration).
+func (db *DB) GetAgentByUserAndName(ctx context.Context, userID int64, name string) (*models.Agent, error) {
+	var a models.Agent
+	err := db.Pool.QueryRow(ctx, `
+		SELECT id, user_id, name, endpoint, last_heartbeat, paired_at
+		FROM agents WHERE user_id = $1 AND name = $2 AND endpoint IS NULL
+	`, userID, name).Scan(&a.ID, &a.UserID, &a.Name, &a.Endpoint, &a.LastHeartbeat, &a.PairedAt)
+	if err != nil {
+		return nil, err
+	}
+	a.IsOnline = a.LastHeartbeat != nil && time.Since(*a.LastHeartbeat) < 2*time.Minute
+	return &a, nil
 }
 
 // RunMigrations runs SQL migration files in order.

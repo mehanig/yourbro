@@ -26,6 +26,7 @@ import (
 	"github.com/mehanig/yourbro/api/internal/handlers"
 	"github.com/mehanig/yourbro/api/internal/middleware"
 	"github.com/mehanig/yourbro/api/internal/models"
+	"github.com/mehanig/yourbro/api/internal/relay"
 	"github.com/mehanig/yourbro/api/internal/storage"
 )
 
@@ -136,7 +137,9 @@ func main() {
 	keysHandler := &handlers.KeysHandler{DB: db}
 	sseBroker := handlers.NewSSEBroker(db)
 	sseBroker.StartStaleChecker(context.Background())
-	agentsHandler := &handlers.AgentsHandler{DB: db, Broker: sseBroker}
+	relayHub := relay.NewHub(db, sseBroker.NotifyUser)
+	agentsHandler := &handlers.AgentsHandler{DB: db, Broker: sseBroker, Hub: relayHub}
+	relayHandler := &handlers.RelayHandler{Hub: relayHub}
 
 	r := chi.NewRouter()
 
@@ -234,6 +237,38 @@ func main() {
 		})
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	// WebSocket endpoint for relay-mode agents (agent auth via Bearer token)
+	r.Get("/ws/agent", func(w http.ResponseWriter, r *http.Request) {
+		// Authenticate agent via Bearer token
+		header := r.Header.Get("Authorization")
+		if header == "" {
+			http.Error(w, "missing authorization", http.StatusUnauthorized)
+			return
+		}
+		parts := strings.SplitN(header, " ", 2)
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			http.Error(w, "invalid authorization format", http.StatusUnauthorized)
+			return
+		}
+		tokenStr := parts[1]
+
+		// Validate API token
+		hash := auth.HashToken(tokenStr)
+		token, err := db.GetTokenByHash(r.Context(), hash)
+		if err != nil {
+			http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+			return
+		}
+
+		// Get agent name from query param
+		agentName := r.URL.Query().Get("name")
+		if agentName == "" {
+			agentName = "relay-agent"
+		}
+
+		relayHub.HandleAgentWS(w, r, token.UserID, agentName)
 	})
 
 	// Authenticated API routes
@@ -336,6 +371,9 @@ func main() {
 			r.Post("/heartbeat", agentsHandler.Heartbeat)
 			r.Get("/stream", sseBroker.ServeHTTP)
 		})
+
+		// Relay — forward requests to relay-mode agents via WebSocket
+		r.Post("/relay/{agent_id}", relayHandler.Relay)
 
 		// Public Keys
 		r.Route("/keys", func(r chi.Router) {

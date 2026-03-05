@@ -113,7 +113,7 @@ export function deleteToken(id: number): Promise<void> {
 export interface Agent {
   id: number;
   name: string;
-  endpoint: string;
+  endpoint: string | null;
   last_heartbeat: string | null;
   paired_at: string;
   is_online: boolean;

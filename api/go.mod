@@ -3,6 +3,7 @@ module github.com/mehanig/yourbro/api
 go 1.23
 
 require (
+	github.com/coder/websocket v1.8.12
 	github.com/go-chi/chi/v5 v5.2.1
 	github.com/go-chi/cors v1.2.1
 	github.com/golang-jwt/jwt/v5 v5.2.1

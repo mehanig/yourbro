@@ -42,22 +42,35 @@ function waitForKeypair(timeoutMs: number = 10000): Promise<{ privateKey: Crypto
 export class ClawdStorage {
   private agentEndpoint: string;
   private pageSlug: string;
+  private mode: 'direct' | 'relay';
+  private agentId: string;
   private cachedPrivateKey: CryptoKey | null = null;
   private cachedPubKeyB64: string | null = null;
   private initPromise: Promise<void> | null = null;
 
-  private constructor(agentEndpoint: string, pageSlug: string) {
+  private constructor(agentEndpoint: string, pageSlug: string, mode: 'direct' | 'relay', agentId: string) {
     this.agentEndpoint = agentEndpoint.replace(/\/$/, "");
     this.pageSlug = pageSlug;
+    this.mode = mode;
+    this.agentId = agentId;
   }
 
   static async init(): Promise<ClawdStorage> {
     const endpoint = getMeta("clawd-agent-endpoint");
     const slug = getMeta("clawd-page-slug");
+    const relayMode = getMeta("clawd-relay-mode") === "true";
+    const agentId = getMeta("clawd-agent-id");
+
+    if (relayMode && slug && agentId) {
+      const instance = new ClawdStorage("", slug, "relay", agentId);
+      await instance.ensureKeys();
+      return instance;
+    }
+
     if (!endpoint || !slug) {
       throw new Error("Missing clawd-agent-endpoint or clawd-page-slug meta tags");
     }
-    const instance = new ClawdStorage(endpoint, slug);
+    const instance = new ClawdStorage(endpoint, slug, "direct", "");
     await instance.ensureKeys();
     return instance;
   }
@@ -145,10 +158,10 @@ export class ClawdStorage {
   }
 
   async get<T = unknown>(key: string): Promise<T | null> {
-    const res = await this.signedFetch(
-      "GET",
-      `/api/storage/${encodeURIComponent(this.pageSlug)}/${encodeURIComponent(key)}`
-    );
+    const path = `/api/storage/${encodeURIComponent(this.pageSlug)}/${encodeURIComponent(key)}`;
+    const res = this.mode === 'relay'
+      ? await this.relayRequest("GET", path)
+      : await this.signedFetch("GET", path);
     if (!res.ok) return null;
     const data = await res.json();
     return JSON.parse(data.value) as T;
@@ -156,31 +169,90 @@ export class ClawdStorage {
 
   async set(key: string, value: unknown): Promise<boolean> {
     const body = JSON.stringify(value);
-    const res = await this.signedFetch(
-      "PUT",
-      `/api/storage/${encodeURIComponent(this.pageSlug)}/${encodeURIComponent(key)}`,
-      body
-    );
+    const path = `/api/storage/${encodeURIComponent(this.pageSlug)}/${encodeURIComponent(key)}`;
+    const res = this.mode === 'relay'
+      ? await this.relayRequest("PUT", path, body)
+      : await this.signedFetch("PUT", path, body);
     return res.ok;
   }
 
   async list(prefix: string = ""): Promise<string[]> {
     const params = prefix ? `?prefix=${encodeURIComponent(prefix)}` : "";
-    const res = await this.signedFetch(
-      "GET",
-      `/api/storage/${encodeURIComponent(this.pageSlug)}${params}`
-    );
+    const path = `/api/storage/${encodeURIComponent(this.pageSlug)}${params}`;
+    const res = this.mode === 'relay'
+      ? await this.relayRequest("GET", path)
+      : await this.signedFetch("GET", path);
     if (!res.ok) return [];
     const entries: Array<{ key: string }> = await res.json();
     return entries.map((e) => e.key);
   }
 
   async delete(key: string): Promise<boolean> {
-    const res = await this.signedFetch(
-      "DELETE",
-      `/api/storage/${encodeURIComponent(this.pageSlug)}/${encodeURIComponent(key)}`
-    );
+    const path = `/api/storage/${encodeURIComponent(this.pageSlug)}/${encodeURIComponent(key)}`;
+    const res = this.mode === 'relay'
+      ? await this.relayRequest("DELETE", path)
+      : await this.signedFetch("DELETE", path);
     return res.ok;
+  }
+
+  private async relayRequest(
+    method: string,
+    path: string,
+    body?: string
+  ): Promise<Response> {
+    await this.ensureKeys();
+    // Use canonical host for relay-mode RFC 9421 signatures
+    const url = `https://relay.internal${path}`;
+    const created = Math.floor(Date.now() / 1000);
+    const nonce = crypto.randomUUID();
+
+    let contentDigest = "";
+    if (body) {
+      const hash = await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(body)
+      );
+      contentDigest = `sha-256=:${base64StdEncode(new Uint8Array(hash))}:`;
+    }
+
+    const coveredComponents = body
+      ? '("@method" "@target-uri" "content-digest")'
+      : '("@method" "@target-uri")';
+    const sigParams = `${coveredComponents};created=${created};nonce="${nonce}";keyid="${this.cachedPubKeyB64}"`;
+
+    const lines: string[] = [
+      `"@method": ${method}`,
+      `"@target-uri": ${url}`,
+    ];
+    if (contentDigest) lines.push(`"content-digest": ${contentDigest}`);
+    lines.push(`"@signature-params": ${sigParams}`);
+    const signatureBase = lines.join("\n");
+
+    const sig = await crypto.subtle.sign(
+      "Ed25519",
+      this.cachedPrivateKey!,
+      new TextEncoder().encode(signatureBase)
+    );
+    const sigB64 = base64StdEncode(new Uint8Array(sig));
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Signature-Input": `sig1=${sigParams}`,
+      "Signature": `sig1=:${sigB64}:`,
+    };
+    if (contentDigest) headers["Content-Digest"] = contentDigest;
+
+    return fetch(`/api/relay/${this.agentId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: crypto.randomUUID(),
+        method,
+        path,
+        headers,
+        body: body || null,
+      }),
+    });
   }
 
   /** Get the public key for pairing (base64url-encoded, no padding). */
@@ -202,8 +274,9 @@ window.ClawdStorage = ClawdStorage;
 
 const endpointMeta = getMeta("clawd-agent-endpoint");
 const slugMeta = getMeta("clawd-page-slug");
+const relayModeMeta = getMeta("clawd-relay-mode") === "true";
 
-if (endpointMeta && slugMeta) {
+if ((endpointMeta && slugMeta) || (relayModeMeta && slugMeta)) {
   ClawdStorage.init()
     .then((storage) => {
       window.clawdStorage = storage;

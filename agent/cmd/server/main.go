@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/mehanig/yourbro/agent/internal/handlers"
 	mw "github.com/mehanig/yourbro/agent/internal/middleware"
+	"github.com/mehanig/yourbro/agent/internal/relay"
 	"github.com/mehanig/yourbro/agent/internal/storage"
 	"golang.org/x/crypto/acme/autocert"
 )
@@ -75,10 +76,41 @@ func main() {
 		r.Delete("/{key}", storageHandler.Delete)
 	})
 
-	// Start heartbeat if API token and server URL are configured
+	// Determine mode: relay (no exposed port) vs direct (public HTTP server)
 	apiToken := os.Getenv("YB_API_TOKEN")
 	serverURL := os.Getenv("YB_SERVER_URL")
-	agentEndpoint := os.Getenv("YB_AGENT_ENDPOINT") // how the server knows this agent
+	agentEndpoint := os.Getenv("YB_AGENT_ENDPOINT")
+	agentName := getEnv("YB_AGENT_NAME", "relay-agent")
+
+	// Auto-detect relay mode: no AGENT_DOMAIN and no AGENT_PORT means relay
+	isRelayMode := domain == "" && os.Getenv("AGENT_PORT") == "" && apiToken != "" && serverURL != ""
+
+	if isRelayMode {
+		log.Printf("=== RELAY MODE ===")
+		log.Printf("Connecting to %s via WebSocket (no exposed port)", serverURL)
+
+		router := &relay.Router{Mux: r}
+		client := &relay.Client{
+			ServerURL: serverURL,
+			APIToken:  apiToken,
+			AgentName: agentName,
+			Handler:   router.HandleRequest,
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+			<-sigCh
+			log.Println("Shutting down...")
+			cancel()
+		}()
+
+		client.Run(ctx)
+		return
+	}
+
+	// Direct mode — start HTTP server with heartbeat
 	if apiToken != "" && serverURL != "" && agentEndpoint != "" {
 		startHeartbeat(serverURL, apiToken, agentEndpoint)
 		log.Printf("Heartbeat started → %s (every 60s)", serverURL)
