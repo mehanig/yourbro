@@ -27,7 +27,7 @@ Production API builds must be done via Docker Compose. Never run `go build` loca
 - **Frontend**: Pushed via `.github/workflows/web-deploy.yml` (triggers on `web/`, `sdk/` changes)
 
 The API `Dockerfile` builds SDK and Go API. Frontend is NOT embedded — it deploys independently to Cloudflare R2.
-`/p/{username}/{slug}` page routes are served by the API server. Cloudflare Redirect Rule sends `yourbro.ai/p/*` to `api.yourbro.ai/p/*`.
+`/p/{username}/{slug}` page routes are served by a static shell (`web/public/p/shell.html`) from R2 via Cloudflare Transform Rule. The shell stays on `yourbro.ai` (same origin for IndexedDB access) and makes cross-origin API calls to `api.yourbro.ai`. SDK is also served from R2 at `/sdk/clawd-storage.js`.
 
 ### Auth
 - Browser auth uses httpOnly `yb_session` cookie (cross-subdomain via `COOKIE_DOMAIN`)

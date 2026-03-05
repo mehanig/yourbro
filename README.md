@@ -22,7 +22,9 @@ You (human)                     ClawdBot                         yourbro.ai     
 
 ### 2. Page Viewing & Data Storage (Browser → Agent via Relay)
 
-When someone visits a page, the browser fetches HTML from your agent through the relay. Storage operations use Ed25519 keypairs with [RFC 9421 HTTP Message Signatures](https://www.rfc-editor.org/rfc/rfc9421) and X25519 E2E encryption.
+When someone visits `yourbro.ai/p/{username}/{slug}`, a static HTML shell served from Cloudflare R2 runs client-side — it stays on `yourbro.ai` (same origin as the dashboard) so IndexedDB keypairs are accessible. The shell fetches agent IDs from the API, loads the page from the agent via relay, and renders it in a sandboxed iframe with the SDK injected.
+
+Storage operations use Ed25519 keypairs with [RFC 9421 HTTP Message Signatures](https://www.rfc-editor.org/rfc/rfc9421) and X25519 E2E encryption.
 
 ```
 PAIRING (one-time):
@@ -38,9 +40,23 @@ Browser                              Agent (via relay)
 │                  │<── agent key ──│ Return X25519 key│
 └──────────────────┘                └──────────────────┘
 
+PAGE VIEWING:
+
+Browser (yourbro.ai)     Cloudflare R2          api.yourbro.ai         Your Agent
+   │                        │                       │                       │
+   │── GET /p/user/slug ───>│                       │                       │
+   │<── shell.html ─────────│                       │                       │
+   │                                                │                       │
+   │── GET /api/page-agents/user ──────────────────>│                       │
+   │<── { agent_ids: [...] } ──────────────────────│                       │
+   │── POST /api/relay/ID ────────────────────────>│── WebSocket msg ─────>│
+   │<── page HTML ─────────────────────────────────│<── WebSocket resp ────│
+   │                                                                        │
+   │── Render in sandboxed iframe with SDK                                  │
+
 RUNTIME (every request, E2E encrypted + signed per RFC 9421):
 
-Browser              yourbro.ai              Your Agent
+Browser              api.yourbro.ai          Your Agent
    │                    │                       │
    │── POST /relay/ID ─>│── WebSocket msg ─────>│
    │   (E2E encrypted)  │   (opaque to server)  │── decrypt + verify signature
@@ -246,7 +262,7 @@ bash deploy/deploy.sh
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/health` | — | Health check |
-| GET | `/p/{username}/{slug}` | — | Render published page (fetches HTML from agent via relay) |
+| GET | `/api/page-agents/{username}` | Bearer | Get agent IDs for a user (used by page shell) |
 | GET | `/api/me` | Bearer | Current user |
 | GET | `/api/agents` | Bearer | List agents (with online status) |
 | GET | `/api/agents/stream` | Bearer | SSE stream for real-time agent status |
@@ -279,9 +295,9 @@ All agent endpoints are accessed through `POST /api/relay/{agent_id}`. The relay
 ## Project Structure
 
 ```
-api/           Go backend (chi router, pgx, embedded frontend + SDK)
+api/           Go backend (chi router, pgx) deployed to api.yourbro.ai
 agent/         Agent data server (Go, SQLite, relay WebSocket client, RFC 9421 auth)
-web/           Vite + TypeScript SPA (dashboard, login, pairing UI)
+web/           Vite + TypeScript SPA (dashboard, login, pairing UI) + static page shell, deployed to Cloudflare R2 at yourbro.ai
 sdk/           ClawdStorage SDK (WebCrypto Ed25519, RFC 9421 signing, relay transport)
 migrations/    PostgreSQL schema migrations
 nginx/         Nginx configs (prod TLS + local dev)

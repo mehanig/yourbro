@@ -31,9 +31,6 @@ import (
 	"github.com/mehanig/yourbro/api/internal/storage"
 )
 
-//go:embed sdk/clawd-storage.js
-var sdkScript string
-
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
@@ -120,8 +117,6 @@ func main() {
 	}
 	defer db.Close()
 
-	log.Printf("Loaded SDK script (%d bytes)", len(sdkScript))
-
 	oauthCfg := auth.NewGoogleOAuthConfig()
 	keysHandler := &handlers.KeysHandler{DB: db}
 	sseBroker := handlers.NewSSEBroker(db)
@@ -131,9 +126,7 @@ func main() {
 	agentsHandler := &handlers.AgentsHandler{DB: db, Broker: sseBroker, Hub: relayHub}
 	relayHandler := &handlers.RelayHandler{Hub: relayHub}
 	pagesHandler := &handlers.PagesHandler{
-		DB:        db,
-		Hub:       relayHub,
-		SDKScript: sdkScript,
+		DB: db,
 	}
 
 	r := chi.NewRouter()
@@ -238,9 +231,6 @@ func main() {
 		// Redirect to frontend — session is in httpOnly cookie, no token in URL
 		http.Redirect(w, r, frontendURL+"/#/callback", http.StatusTemporaryRedirect)
 	})
-
-	// Public page rendering — shell fetches HTML from agent via relay
-	r.Get("/p/{username}/{slug}", pagesHandler.RenderPage)
 
 	// Logout — clears httpOnly session cookie (no auth required)
 	r.Post("/api/logout", func(w http.ResponseWriter, r *http.Request) {
