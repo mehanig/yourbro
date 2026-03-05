@@ -1,18 +1,10 @@
-# Stage 1a: Build SDK
+# Stage 1: Build SDK (needed for inline injection into page content)
 FROM node:22-alpine AS sdk
 WORKDIR /build/sdk
 COPY sdk/package.json ./
 RUN npm install --ignore-scripts && npm rebuild esbuild
 COPY sdk/src/ ./src/
 COPY sdk/tsconfig.json ./
-RUN npm run build
-
-# Stage 1b: Build frontend
-FROM node:22-alpine AS frontend
-WORKDIR /build/web
-COPY web/package.json web/package-lock.json* ./
-RUN npm ci
-COPY web/ ./
 RUN npm run build
 
 # Stage 2: Build Go binary
@@ -28,9 +20,8 @@ RUN cd api && go mod download
 COPY api/ ./api/
 COPY migrations/ ./migrations/
 
-# Copy frontend build, SDK bundle, and migrations into embed paths
-COPY --from=frontend /build/web/dist/ ./api/cmd/server/static/
-COPY --from=sdk /build/sdk/dist/clawd-storage.js ./api/cmd/server/static/sdk/clawd-storage.js
+# Copy SDK bundle and migrations into embed paths
+COPY --from=sdk /build/sdk/dist/clawd-storage.js ./api/cmd/server/sdk/clawd-storage.js
 COPY migrations/ ./api/cmd/server/migrations/
 
 # Build

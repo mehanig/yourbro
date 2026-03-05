@@ -23,17 +23,6 @@ type Token struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type Page struct {
-	ID            int64     `json:"id"`
-	UserID        int64     `json:"user_id"`
-	Slug          string    `json:"slug"`
-	Title         string    `json:"title"`
-	HTMLContent   string    `json:"html_content,omitempty"`
-	AgentEndpoint *string   `json:"agent_endpoint,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
-
 type PublicKey struct {
 	ID        int64     `json:"id"`
 	UserID    int64     `json:"user_id"`
@@ -51,13 +40,6 @@ type Agent struct {
 }
 
 // API request/response types
-
-type CreatePageRequest struct {
-	Slug          string `json:"slug"`
-	Title         string `json:"title"`
-	HTMLContent   string `json:"html_content"`
-	AgentEndpoint string `json:"agent_endpoint,omitempty"`
-}
 
 type CreatePublicKeyRequest struct {
 	Name      string `json:"name"`

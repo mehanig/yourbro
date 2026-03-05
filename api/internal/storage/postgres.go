@@ -118,71 +118,8 @@ func (db *DB) DeleteToken(ctx context.Context, id, userID int64) error {
 	return err
 }
 
-// Pages
-
-func (db *DB) CreatePage(ctx context.Context, userID int64, slug, title, htmlContent string, agentEndpoint *string) (*models.Page, error) {
-	var p models.Page
-	err := db.Pool.QueryRow(ctx, `
-		INSERT INTO pages (user_id, slug, title, html_content, agent_endpoint)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (user_id, slug) DO UPDATE SET title = $3, html_content = $4, agent_endpoint = $5, updated_at = NOW()
-		RETURNING id, user_id, slug, title, html_content, agent_endpoint, created_at, updated_at
-	`, userID, slug, title, htmlContent, agentEndpoint).Scan(&p.ID, &p.UserID, &p.Slug, &p.Title, &p.HTMLContent, &p.AgentEndpoint, &p.CreatedAt, &p.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &p, nil
-}
-
-func (db *DB) GetPage(ctx context.Context, id int64) (*models.Page, error) {
-	var p models.Page
-	err := db.Pool.QueryRow(ctx, `
-		SELECT id, user_id, slug, title, html_content, agent_endpoint, created_at, updated_at
-		FROM pages WHERE id = $1
-	`, id).Scan(&p.ID, &p.UserID, &p.Slug, &p.Title, &p.HTMLContent, &p.AgentEndpoint, &p.CreatedAt, &p.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &p, nil
-}
-
-func (db *DB) GetPageByUserAndSlug(ctx context.Context, userID int64, slug string) (*models.Page, error) {
-	var p models.Page
-	err := db.Pool.QueryRow(ctx, `
-		SELECT id, user_id, slug, title, html_content, agent_endpoint, created_at, updated_at
-		FROM pages WHERE user_id = $1 AND slug = $2
-	`, userID, slug).Scan(&p.ID, &p.UserID, &p.Slug, &p.Title, &p.HTMLContent, &p.AgentEndpoint, &p.CreatedAt, &p.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return &p, nil
-}
-
-func (db *DB) ListPages(ctx context.Context, userID int64) ([]models.Page, error) {
-	rows, err := db.Pool.Query(ctx, `
-		SELECT id, user_id, slug, title, agent_endpoint, created_at, updated_at
-		FROM pages WHERE user_id = $1 ORDER BY updated_at DESC
-	`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var pages []models.Page
-	for rows.Next() {
-		var p models.Page
-		if err := rows.Scan(&p.ID, &p.UserID, &p.Slug, &p.Title, &p.AgentEndpoint, &p.CreatedAt, &p.UpdatedAt); err != nil {
-			return nil, err
-		}
-		pages = append(pages, p)
-	}
-	return pages, nil
-}
-
-func (db *DB) DeletePage(ctx context.Context, id, userID int64) error {
-	_, err := db.Pool.Exec(ctx, `DELETE FROM pages WHERE id = $1 AND user_id = $2`, id, userID)
-	return err
-}
+// Pages — removed. Pages are now stored on the agent and fetched via relay.
+// See docs/plans/2026-03-05-refactor-zero-knowledge-relay-pages-plan.md
 
 // Public Keys
 

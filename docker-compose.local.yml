@@ -7,8 +7,9 @@ services:
 
   api:
     environment:
-      FRONTEND_URL: http://localhost
+      FRONTEND_URL: http://localhost:5173
       GOOGLE_REDIRECT_URL: http://localhost/auth/google/callback
+      COOKIE_DOMAIN: ""
 
   agent-server:
     build:

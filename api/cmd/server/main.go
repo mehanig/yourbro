@@ -5,7 +5,6 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -32,8 +31,8 @@ import (
 	"github.com/mehanig/yourbro/api/internal/storage"
 )
 
-//go:embed static/*
-var staticFiles embed.FS
+//go:embed sdk/clawd-storage.js
+var sdkScript string
 
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
@@ -121,20 +120,9 @@ func main() {
 	}
 	defer db.Close()
 
-	// Load SDK script for inline injection into page content
-	sdkScript := ""
-	if sdkData, err := staticFiles.ReadFile("static/sdk/clawd-storage.js"); err == nil {
-		sdkScript = string(sdkData)
-		log.Printf("Loaded SDK script (%d bytes)", len(sdkScript))
-	} else {
-		log.Printf("WARNING: SDK script not found in static/sdk/clawd-storage.js: %v", err)
-	}
+	log.Printf("Loaded SDK script (%d bytes)", len(sdkScript))
 
 	oauthCfg := auth.NewGoogleOAuthConfig()
-	pagesHandler := &handlers.PagesHandler{
-		DB:        db,
-		SDKScript: sdkScript,
-	}
 	keysHandler := &handlers.KeysHandler{DB: db}
 	sseBroker := handlers.NewSSEBroker(db)
 	sseBroker.StartStaleChecker(context.Background())
@@ -142,6 +130,11 @@ func main() {
 	sseBroker.Hub = relayHub
 	agentsHandler := &handlers.AgentsHandler{DB: db, Broker: sseBroker, Hub: relayHub}
 	relayHandler := &handlers.RelayHandler{Hub: relayHub}
+	pagesHandler := &handlers.PagesHandler{
+		DB:        db,
+		Hub:       relayHub,
+		SDKScript: sdkScript,
+	}
 
 	r := chi.NewRouter()
 
@@ -156,7 +149,7 @@ func main() {
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type"},
 		AllowCredentials: true,
-		MaxAge:           300,
+		MaxAge:           86400,
 	}))
 
 	// Health check
@@ -167,15 +160,44 @@ func main() {
 
 	// OAuth routes
 	r.Get("/auth/google", func(w http.ResponseWriter, r *http.Request) {
-		state := r.URL.Query().Get("state")
-		if state == "" {
-			state = "login"
+		state, err := auth.GenerateRandomHex(16)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
 		}
+		// Store state in short-lived httpOnly cookie for CSRF validation
+		http.SetCookie(w, &http.Cookie{
+			Name:     "oauth_state",
+			Value:    state,
+			Path:     "/auth/google/callback",
+			HttpOnly: true,
+			Secure:   getEnv("COOKIE_DOMAIN", "") != "",
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   300, // 5 minutes
+		})
 		url := oauthCfg.AuthCodeURL(state, oauth2.SetAuthURLParam("prompt", "select_account"))
 		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 	})
 
 	r.Get("/auth/google/callback", func(w http.ResponseWriter, r *http.Request) {
+		// Validate CSRF state
+		stateCookie, err := r.Cookie("oauth_state")
+		if err != nil || stateCookie.Value == "" {
+			http.Error(w, "missing state cookie", http.StatusBadRequest)
+			return
+		}
+		if r.URL.Query().Get("state") != stateCookie.Value {
+			http.Error(w, "invalid state parameter", http.StatusBadRequest)
+			return
+		}
+		// Clear state cookie
+		http.SetCookie(w, &http.Cookie{
+			Name:   "oauth_state",
+			Value:  "",
+			Path:   "/auth/google/callback",
+			MaxAge: -1,
+		})
+
 		code := r.URL.Query().Get("code")
 		if code == "" {
 			http.Error(w, "missing code", http.StatusBadRequest)
@@ -211,33 +233,18 @@ func main() {
 			return
 		}
 
-		// Set httpOnly session cookie (used by SSE EventSource which can't set headers)
-		http.SetCookie(w, &http.Cookie{
-			Name:     "yb_session",
-			Value:    token,
-			Path:     "/",
-			HttpOnly: true,
-			Secure:   os.Getenv("ENVIRONMENT") == "production",
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   7 * 24 * 60 * 60, // 7 days, matches JWT expiry
-		})
+		http.SetCookie(w, sessionCookie(token, 7*24*60*60))
 
-		http.Redirect(w, r, frontendURL+"/#/callback?token="+token, http.StatusTemporaryRedirect)
+		// Redirect to frontend — session is in httpOnly cookie, no token in URL
+		http.Redirect(w, r, frontendURL+"/#/callback", http.StatusTemporaryRedirect)
 	})
 
-	// Public page rendering
+	// Public page rendering — shell fetches HTML from agent via relay
 	r.Get("/p/{username}/{slug}", pagesHandler.RenderPage)
-	r.Get("/api/pages/{id}/content", pagesHandler.RenderPageContent)
 
 	// Logout — clears httpOnly session cookie (no auth required)
 	r.Post("/api/logout", func(w http.ResponseWriter, r *http.Request) {
-		http.SetCookie(w, &http.Cookie{
-			Name:     "yb_session",
-			Value:    "",
-			Path:     "/",
-			HttpOnly: true,
-			MaxAge:   -1,
-		})
+		http.SetCookie(w, sessionCookie("", -1))
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
 	})
@@ -277,6 +284,18 @@ func main() {
 	// Authenticated API routes
 	r.Route("/api", func(r chi.Router) {
 		r.Use(middleware.RequireAuth(db))
+
+		// Short-lived content token for sandboxed iframes (can't send httpOnly cookies)
+		r.Get("/content-token", func(w http.ResponseWriter, r *http.Request) {
+			userID := middleware.GetUserID(r)
+			token, err := auth.CreateSessionToken(userID)
+			if err != nil {
+				http.Error(w, `{"error":"failed to create token"}`, http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"token": token})
+		})
 
 		// User info
 		r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
@@ -357,14 +376,8 @@ func main() {
 			json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 		})
 
-		// Pages
-		r.Route("/pages", func(r chi.Router) {
-			r.With(middleware.RequireScope("publish:pages")).Post("/", pagesHandler.Create)
-			r.With(middleware.RequireScope("read:pages")).Get("/", pagesHandler.List)
-			r.With(middleware.RequireScope("read:pages")).Get("/{id}", pagesHandler.Get)
-			r.With(middleware.RequireScope("read:pages")).Get("/{id}/content-meta", pagesHandler.ContentMeta)
-			r.Delete("/{id}", pagesHandler.Delete)
-		})
+		// Pages — removed. Pages are now stored on the agent and fetched via relay.
+		// The /p/{username}/{slug} shell handles all page rendering.
 
 		// Agents
 		r.Route("/agents", func(r chi.Router) {
@@ -383,28 +396,6 @@ func main() {
 			r.Get("/", keysHandler.List)
 			r.With(middleware.RequireScope("manage:keys")).Delete("/{id}", keysHandler.Delete)
 		})
-	})
-
-	// Embedded frontend: serve static files with SPA fallback
-	staticSub, err := fs.Sub(staticFiles, "static")
-	if err != nil {
-		log.Fatalf("Failed to create static sub filesystem: %v", err)
-	}
-	fileServer := http.FileServer(http.FS(staticSub))
-	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
-		// Try serving the actual file first
-		path := strings.TrimPrefix(req.URL.Path, "/")
-		if path == "" {
-			path = "index.html"
-		}
-		if f, err := staticSub.Open(path); err == nil {
-			f.Close()
-			fileServer.ServeHTTP(w, req)
-			return
-		}
-		// SPA fallback: serve index.html for client-side routing
-		req.URL.Path = "/"
-		fileServer.ServeHTTP(w, req)
 	})
 
 	port := getEnv("PORT", "8080")
@@ -435,5 +426,19 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// sessionCookie creates a consistent session cookie with cross-subdomain support.
+func sessionCookie(value string, maxAge int) *http.Cookie {
+	return &http.Cookie{
+		Name:     "yb_session",
+		Value:    value,
+		Domain:   getEnv("COOKIE_DOMAIN", ""), // "yourbro.ai" in prod, empty for local
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   getEnv("COOKIE_DOMAIN", "") != "", // Secure only when cross-subdomain (production)
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   maxAge,
+	}
 }
 

@@ -1,4 +1,7 @@
+import { API_BASE } from "../lib/api";
+
 export function renderLogin(container: HTMLElement) {
+  const apiBase = API_BASE;
   container.innerHTML = `
     <style>
       @media(max-width:700px){
@@ -19,7 +22,7 @@ export function renderLogin(container: HTMLElement) {
           Your ClawdBot connects via WebSocket relay, stores data in its own SQLite, and publishes pages to the web. All traffic is end-to-end encrypted&mdash;the server is just a pipe. No exposed ports, no cloud databases.
         </p>
         <div style="display:flex;gap:1rem;align-items:center;margin-top:0.5rem;flex-wrap:wrap;justify-content:center;">
-          <a href="/auth/google"
+          <a href="${apiBase}/auth/google"
              style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.75rem 1.5rem;background:#e6edf3;color:#0d1117;border-radius:8px;text-decoration:none;font-weight:600;font-size:1rem;transition:opacity 0.2s;"
              onmouseover="this.style.opacity='0.85'"
              onmouseout="this.style.opacity='1'">
@@ -82,7 +85,7 @@ export function renderLogin(container: HTMLElement) {
       <section style="text-align:center;padding:3rem 0 1rem;border-top:1px solid #30363d;margin-top:2rem;">
         <h2 style="font-size:1.6rem;font-weight:700;margin:0 0 1rem;">Ready to get started?</h2>
         <div style="display:flex;gap:1rem;align-items:center;justify-content:center;flex-wrap:wrap;">
-          <a href="/auth/google"
+          <a href="${apiBase}/auth/google"
              style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.75rem 1.5rem;background:#e6edf3;color:#0d1117;border-radius:8px;text-decoration:none;font-weight:600;font-size:1rem;transition:opacity 0.2s;"
              onmouseover="this.style.opacity='0.85'"
              onmouseout="this.style.opacity='1'">

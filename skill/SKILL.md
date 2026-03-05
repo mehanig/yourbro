@@ -35,15 +35,15 @@ metadata:
 
 # yourbro — Publish AI-Powered Pages
 
-Publish thin HTML pages to yourbro.ai with zero-trust, agent-backed storage. Your ClawdBot publishes pages, the yourbro SDK fetches data directly from your agent. yourbro servers never see your data.
+Publish thin HTML pages to yourbro.ai with zero-trust, agent-backed storage. Your ClawdBot publishes pages to your agent (which stores them locally), and yourbro.ai renders them by fetching content from your agent on demand. yourbro servers never store your data.
 
 ## How It Works
 
 ```
-ClawdBot publishes HTML page -> yourbro.ai renders it -> SDK in page fetches data from your agent -> displayed in browser
+ClawdBot publishes page via relay -> your agent stores it locally -> visitor loads page -> yourbro.ai fetches HTML from your agent -> SDK in page fetches data from your agent -> displayed in browser
 ```
 
-Your agent (yourbro-agent) runs on your machine and stores data in its own SQLite database. Pages published to yourbro.ai are thin HTML shells. The yourbro SDK embedded in those pages fetches data from your agent using Ed25519-signed requests.
+Your agent (yourbro-agent) runs on your machine and stores everything (pages + data) in its own SQLite database. yourbro.ai is a pure relay — it never stores, sees, or serves your content. Pages only work when your agent is online.
 
 The agent connects to yourbro.ai via an outbound WebSocket — no exposed ports, no DNS, no TLS certificates needed.
 
@@ -51,7 +51,7 @@ The agent connects to yourbro.ai via an outbound WebSocket — no exposed ports,
 
 ### 1. Get a yourbro API token
 
-Sign in at https://yourbro.ai, go to your dashboard, and create an API token with scopes: `publish:pages`, `read:pages`.
+Sign in at https://yourbro.ai, go to your dashboard, and create an API token.
 
 Set it in your OpenClaw configuration:
 
@@ -71,7 +71,7 @@ Set it in your OpenClaw configuration:
 
 ### 2. Start the agent
 
-The `yourbro-agent` binary is your personal data storage server. Set your API token and server URL, then start it:
+The `yourbro-agent` binary is your personal storage server. Set your API token and server URL, then start it:
 
 ```bash
 export YOURBRO_TOKEN="yb_your_token_here"
@@ -99,10 +99,10 @@ Go to your yourbro.ai dashboard. Your agent appears in the "Paired Agents" list 
 Ask your ClawdBot to publish a page. It will use this skill to:
 
 1. Generate HTML content
-2. POST to yourbro.ai/api/pages with your token
+2. Store the page on your agent via relay (`PUT /api/page/{slug}`)
 3. The page goes live at `https://yourbro.ai/p/USERNAME/SLUG`
 
-Pages with agent storage automatically use the relay — the SDK routes requests through yourbro.ai to your agent.
+Pages are served on-demand from your agent. If the agent is offline, visitors see an "agent offline" message.
 
 ## Configuration
 
@@ -120,77 +120,64 @@ When the user asks you to publish a page or create a web page on yourbro:
 
 1. **Check for token**: Verify `YOURBRO_TOKEN` is set in the environment.
 
-2. **Generate HTML**: Create the HTML/JS/CSS content. If the page needs persistent data, use the ClawdStorage SDK:
+2. **Find the agent ID**: List the user's agents to get the agent ID:
+   ```bash
+   curl https://yourbro.ai/api/agents \
+     -H "Authorization: Bearer $YOURBRO_TOKEN"
+   ```
+   Use the first online agent's `id`.
+
+3. **Generate HTML**: Create the HTML/JS/CSS content. If the page needs persistent data, use the ClawdStorage SDK:
    ```javascript
    const storage = await ClawdStorage.init();
    const data = await storage.get("my-key");
    await storage.set("counter", 42);
    ```
 
-3. **Publish the page**:
+4. **Publish the page via relay** (stores on your agent, not the server):
    ```bash
-   curl -X POST https://yourbro.ai/api/pages \
+   curl -X POST "https://yourbro.ai/api/relay/AGENT_ID" \
      -H "Authorization: Bearer $YOURBRO_TOKEN" \
      -H "Content-Type: application/json" \
      -d '{
-       "slug": "my-page",
-       "title": "My Page",
-       "html_content": "<html>...</html>",
-       "agent_endpoint": "relay:AGENT_ID"
+       "id": "'"$(uuidgen)"'",
+       "method": "PUT",
+       "path": "/api/page/my-page",
+       "headers": {"Content-Type": "application/json"},
+       "body": "{\"title\": \"My Page\", \"html_content\": \"<html>...</html>\"}"
      }'
    ```
-   Replace `AGENT_ID` with your agent's ID from the dashboard.
+   Replace `AGENT_ID` with your agent's ID.
 
-4. **Share the URL**: `https://yourbro.ai/p/USERNAME/SLUG`
-
-## Token Scopes
-
-- `publish:pages` -- Create and update pages
-- `read:pages` -- List and view pages
-- `manage:keys` -- Manage public keys
-
-## Headless/CLI Access
-
-To access agent data without a browser (CLI, CI, Claude):
-
-```bash
-# Get agent endpoint for a page
-curl https://yourbro.ai/api/pages/{id}/content-meta \
-  -H "Authorization: Bearer $YOURBRO_TOKEN"
-
-# Returns: {"agent_endpoint": "https://...", "slug": "my-page"}
-```
-
-Then sign requests with your Ed25519 keypair per RFC 9421.
-
-## Security Model
-
-yourbro uses zero-trust architecture:
-
-- **Ed25519 keypairs**: Generated locally, never transmitted. Like SSH keys.
-- **RFC 9421 HTTP Signatures**: Every request is cryptographically signed. No bearer tokens for agent communication.
-- **Content-Digest**: Body integrity verification prevents tampering.
-- **Zero server secrets**: No API tokens or private keys stored on yourbro.ai. You own your keys.
-- **Data isolation**: Each agent has its own SQLite database. yourbro servers are untrusted brokers -- they route pages but never see your data.
+5. **Share the URL**: `https://yourbro.ai/p/USERNAME/SLUG`
 
 ## Examples
 
 ### Simple static page
 
 ```bash
-curl -X POST https://yourbro.ai/api/pages \
+# Get agent ID
+AGENT_ID=$(curl -s https://yourbro.ai/api/agents \
+  -H "Authorization: Bearer $YOURBRO_TOKEN" | jq '.[0].id')
+
+# Publish via relay to agent
+curl -X POST "https://yourbro.ai/api/relay/$AGENT_ID" \
   -H "Authorization: Bearer $YOURBRO_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "slug": "hello",
-    "title": "Hello World",
-    "html_content": "<!DOCTYPE html><html><body><h1>Hello from yourbro!</h1></body></html>"
+    "id": "'"$(uuidgen)"'",
+    "method": "PUT",
+    "path": "/api/page/hello",
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"title\": \"Hello World\", \"html_content\": \"<!DOCTYPE html><html><body><h1>Hello from yourbro!</h1></body></html>\"}"
   }'
 ```
 
-### Page with agent-backed storage (relay mode)
+Page is live at: `https://yourbro.ai/p/USERNAME/hello`
 
-Publish with `agent_endpoint` set to `relay:{agent_id}` (the dashboard shows the agent ID). The ClawdStorage SDK handles auth and relay routing automatically:
+### Page with agent-backed storage
+
+The ClawdStorage SDK handles auth and relay routing automatically:
 
 ```javascript
 const storage = await ClawdStorage.init();
@@ -210,12 +197,54 @@ await storage.delete("old-key");
 
 ### Update an existing page
 
+Same as publishing — `PUT /api/page/{slug}` creates or updates:
+
 ```bash
-curl -X PUT https://yourbro.ai/api/pages/{id} \
+curl -X POST "https://yourbro.ai/api/relay/$AGENT_ID" \
   -H "Authorization: Bearer $YOURBRO_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "title": "Updated Title",
-    "html_content": "<html>...new content...</html>"
+    "id": "'"$(uuidgen)"'",
+    "method": "PUT",
+    "path": "/api/page/hello",
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"title\": \"Updated Title\", \"html_content\": \"<html>...new content...</html>\"}"
   }'
 ```
+
+### Delete a page
+
+```bash
+curl -X POST "https://yourbro.ai/api/relay/$AGENT_ID" \
+  -H "Authorization: Bearer $YOURBRO_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "'"$(uuidgen)"'",
+    "method": "DELETE",
+    "path": "/api/page/hello"
+  }'
+```
+
+### List pages
+
+```bash
+curl -X POST "https://yourbro.ai/api/relay/$AGENT_ID" \
+  -H "Authorization: Bearer $YOURBRO_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "'"$(uuidgen)"'",
+    "method": "GET",
+    "path": "/api/pages"
+  }'
+```
+
+## Security Model
+
+yourbro uses zero-trust architecture:
+
+- **Zero-knowledge server**: yourbro.ai never stores, sees, or serves your page content. It's a pure relay.
+- **Ed25519 keypairs**: Generated locally, never transmitted. Like SSH keys.
+- **RFC 9421 HTTP Signatures**: Storage operations are cryptographically signed. No bearer tokens for agent data.
+- **Content-Digest**: Body integrity verification prevents tampering.
+- **Data isolation**: Each agent has its own SQLite database. All content lives on your machine.
+- **Agent must be online**: Pages only work when your agent is connected. No stale data, no server-side caching.

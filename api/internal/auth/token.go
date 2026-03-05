@@ -11,6 +11,15 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// GenerateRandomHex returns a hex-encoded random string of the given byte length.
+func GenerateRandomHex(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate random: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
 // GenerateAPIToken creates a random API token string.
 func GenerateAPIToken() (string, error) {
 	b := make([]byte, 32)

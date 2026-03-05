@@ -1,42 +1,40 @@
-const API_BASE = "";
+export const API_BASE = import.meta.env.VITE_API_URL || "";
 
-function getToken(): string | null {
-  return localStorage.getItem("yb_session");
-}
-
-export function setToken(token: string) {
-  localStorage.setItem("yb_session", token);
-}
-
-export function clearToken() {
-  localStorage.removeItem("yb_session");
+// Login state: httpOnly cookie holds the session, localStorage flag is for UI only
+export function setLoggedIn(loggedIn: boolean) {
+  if (loggedIn) {
+    localStorage.setItem("yb_logged_in", "1");
+  } else {
+    localStorage.removeItem("yb_logged_in");
+  }
 }
 
 export function isLoggedIn(): boolean {
-  return !!getToken();
+  return localStorage.getItem("yb_logged_in") === "1";
 }
 
 async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
 
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
+    credentials: "include",
   });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error || res.statusText);
+  }
+
+  if (res.status === 204) {
+    return undefined as T;
   }
 
   return res.json();
@@ -53,26 +51,35 @@ export function getMe(): Promise<User> {
   return request("/api/me");
 }
 
-// Pages
+// Pages (stored on agent, fetched via relay)
 export interface Page {
-  id: number;
   slug: string;
   title: string;
-  html_content?: string;
-  created_at: string;
   updated_at: string;
 }
 
-export function listPages(): Promise<Page[]> {
-  return request("/api/pages");
-}
-
-export function getPage(id: number): Promise<Page> {
-  return request(`/api/pages/${id}`);
-}
-
-export function deletePage(id: number): Promise<void> {
-  return request(`/api/pages/${id}`, { method: "DELETE" });
+/** Fetch page list from agent via relay. Returns empty array if agent is offline. */
+export async function listPagesViaRelay(agentId: number): Promise<Page[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/relay/${agentId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        id: crypto.randomUUID(),
+        method: "GET",
+        path: "/api/pages",
+      }),
+    });
+    if (!res.ok) return [];
+    const envelope = await res.json();
+    if (envelope.status === 200 && envelope.body) {
+      return JSON.parse(envelope.body) as Page[];
+    }
+    return [];
+  } catch {
+    return [];
+  }
 }
 
 // Tokens
@@ -130,4 +137,9 @@ export function registerAgent(name: string): Promise<Agent> {
 
 export function deleteAgent(id: number): Promise<void> {
   return request(`/api/agents/${id}`, { method: "DELETE" });
+}
+
+export async function logout(): Promise<void> {
+  await request("/api/logout", { method: "POST" });
+  setLoggedIn(false);
 }
