@@ -1,0 +1,33 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', 'sdk/**']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build SDK
+        run: cd sdk && npm install --ignore-scripts && npm rebuild esbuild && npm run build
+
+      - name: Build Frontend
+        run: cd web && npm ci && npm run build
+        env:
+          VITE_API_URL: https://api.yourbro.ai
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: web

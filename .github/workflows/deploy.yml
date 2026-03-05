@@ -3,6 +3,13 @@ name: Deploy to Production
 on:
   push:
     branches: [main]
+    paths:
+      - 'api/**'
+      - 'sdk/**'
+      - 'migrations/**'
+      - 'deploy/**'
+      - 'Dockerfile'
+      - 'docker-compose*.yml'
   workflow_dispatch:
 
 env:
@@ -99,8 +106,9 @@ jobs:
             JWT_SECRET=${JWT_SECRET}
             GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
-            GOOGLE_REDIRECT_URL=https://yourbro.ai/auth/google/callback
+            GOOGLE_REDIRECT_URL=https://api.yourbro.ai/auth/google/callback
             FRONTEND_URL=https://yourbro.ai
+            COOKIE_DOMAIN=yourbro.ai
             YOURBRO_INTERNAL_KEY=${INTERNAL_KEY}
             DOMAIN=yourbro.ai
             EOF
@@ -117,9 +125,12 @@ jobs:
             }
             ensure_env GOOGLE_CLIENT_ID '${{ secrets.GOOGLE_CLIENT_ID }}'
             ensure_env GOOGLE_CLIENT_SECRET '${{ secrets.GOOGLE_CLIENT_SECRET }}'
-            ensure_env GOOGLE_REDIRECT_URL 'https://yourbro.ai/auth/google/callback'
             ensure_env FRONTEND_URL 'https://yourbro.ai'
             ensure_env DOMAIN 'yourbro.ai'
+            ensure_env COOKIE_DOMAIN 'yourbro.ai'
+
+            # Update redirect URL for API subdomain (ensure_env won't update existing values)
+            sed -i "s|GOOGLE_REDIRECT_URL=.*|GOOGLE_REDIRECT_URL=https://api.yourbro.ai/auth/google/callback|" "$ENV_FILE"
 
             # Deploy
             cd /opt/yourbro

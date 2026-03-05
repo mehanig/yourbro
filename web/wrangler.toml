@@ -1,0 +1,13 @@
+name = "yourbro-frontend"
+compatibility_date = "2026-03-05"
+
+# Deploy without custom_domain first — test on .workers.dev URL
+# Uncomment after verifying the build works:
+# routes = [
+#   { pattern = "yourbro.ai", custom_domain = true }
+# ]
+
+[assets]
+directory = "./dist/"
+html_handling = "force-trailing-slash"
+not_found_handling = "single-page-application"
