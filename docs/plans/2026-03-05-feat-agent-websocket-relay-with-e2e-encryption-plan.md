@@ -555,7 +555,7 @@ Two env vars instead of five. No domain, no port, no TLS.
 - [x] Pairing works through relay (user enters pairing code only, no endpoint URL)
 - [x] All storage operations (get/set/list/delete) work through relay
 - [x] Agent unpairing works through relay
-- [ ] E2E encryption: server cannot read relay payloads (Phase 2)
+- [x] E2E encryption: server cannot read relay payloads (Phase 2)
 - [x] SDK pages work with relay-mode agents
 - [x] Dashboard shows relay-mode agent status (online/offline via WS state)
 - [x] Agent reconnects automatically on WebSocket disconnect (exponential backoff)
@@ -573,12 +573,12 @@ Two env vars instead of five. No domain, no port, no TLS.
 ### Security Requirements
 
 - [x] XSS in dashboard.ts fixed before E2E ships (Phase 0.1)
-- [ ] Server cannot read E2E encrypted payloads
-- [ ] Server cannot forge RFC 9421 signatures
-- [ ] X25519 keypairs generated separately (not derived from Ed25519)
-- [ ] Agent authenticates WebSocket connection via API token
-- [ ] Replay protection: nonce + timestamp validation on agent side
-- [ ] Key fingerprint verification available after pairing (visual confirmation)
+- [x] Server cannot read E2E encrypted payloads
+- [x] Server cannot forge RFC 9421 signatures
+- [x] X25519 keypairs generated separately (not derived from Ed25519)
+- [x] Agent authenticates WebSocket connection via API token
+- [x] Replay protection: nonce + timestamp validation on agent side
+- [x] Key fingerprint verification available after pairing (visual confirmation)
 
 ## Dependencies & Risks
 
