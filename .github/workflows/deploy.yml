@@ -136,6 +136,7 @@ jobs:
             cd /opt/yourbro
             docker compose pull
             docker compose up -d
+            docker compose restart nginx
             sleep 3
             docker compose exec -T api ./server migrate
             docker image prune -f
