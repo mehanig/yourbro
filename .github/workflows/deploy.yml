@@ -1,0 +1,52 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: mehanig.azurecr.io
+  IMAGE: mehanig.azurecr.io/yourbro
+
+jobs:
+  build-and-push:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Azure/docker-login@v1
+        with:
+          login-server: ${{ env.REGISTRY }}
+          username: mehanig
+          password: ${{ secrets.AZ_REGISTRY_PASSWORD }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+
+  deploy:
+    name: Deploy to VPS
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/yourbro
+            docker compose pull
+            docker compose up -d
+            sleep 3
+            docker compose exec -T api ./server migrate
+            docker image prune -f
+            echo "Deploy complete"
+            docker compose ps
