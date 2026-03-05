@@ -22,6 +22,8 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
+	"golang.org/x/oauth2"
+
 	"github.com/mehanig/yourbro/api/internal/auth"
 	"github.com/mehanig/yourbro/api/internal/handlers"
 	"github.com/mehanig/yourbro/api/internal/middleware"
@@ -169,7 +171,7 @@ func main() {
 		if state == "" {
 			state = "login"
 		}
-		url := oauthCfg.AuthCodeURL(state)
+		url := oauthCfg.AuthCodeURL(state, oauth2.SetAuthURLParam("prompt", "select_account"))
 		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 	})
 
