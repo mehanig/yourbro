@@ -122,6 +122,21 @@ func (h *PairHandler) Pair(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// Regenerate creates a fresh pairing code if the current one is expired or used.
+// Returns the current (or new) code. Thread-safe.
+func (h *PairHandler) Regenerate(genCode func(int) string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.used && time.Now().Before(h.PairingExpiry) {
+		return h.PairingCode // still valid
+	}
+	h.PairingCode = genCode(8)
+	h.PairingExpiry = time.Now().Add(5 * time.Minute)
+	h.attempts = 0
+	h.used = false
+	return h.PairingCode
+}
+
 // RevokeKey handles DELETE /api/keys — removes the signing key from authorized_keys.
 // Protected by VerifyUserSignature middleware, so only the key owner can revoke their own key.
 func (h *PairHandler) RevokeKey(w http.ResponseWriter, r *http.Request) {
