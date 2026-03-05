@@ -1,10 +1,13 @@
-name: Deploy Frontend
+name: Deploy Frontend to R2
 
 on:
   push:
     branches: [main]
     paths: ['web/**', 'sdk/**']
   workflow_dispatch:
+
+env:
+  BUILD_PATH: build-${{ github.run_number }}
 
 jobs:
   deploy:
@@ -26,8 +29,113 @@ jobs:
         env:
           VITE_API_URL: https://api.yourbro.ai
 
-      - name: Deploy to Cloudflare Workers
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          workingDirectory: web
+      - name: Deploy to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          aws s3 sync web/dist s3://yourbro-web/${{ env.BUILD_PATH }} \
+            --endpoint-url https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com \
+            --region auto
+
+      - name: Update Cloudflare Transform Rules
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+        run: |
+          curl -sf -X PUT "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/rulesets/phases/http_request_transform/entrypoint" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data '{
+              "rules": [
+                {
+                  "expression": "(starts_with(http.request.uri.path, \"/assets/\"))",
+                  "description": "Serve Vite Assets",
+                  "action": "rewrite",
+                  "action_parameters": {
+                    "uri": {
+                      "path": {
+                        "expression": "concat(\"/${{ env.BUILD_PATH }}\", http.request.uri.path)"
+                      }
+                    }
+                  }
+                },
+                {
+                  "expression": "(ends_with(http.request.uri.path, \".png\") or ends_with(http.request.uri.path, \".svg\") or ends_with(http.request.uri.path, \".ico\") or ends_with(http.request.uri.path, \".jpg\") or ends_with(http.request.uri.path, \".jpeg\") or ends_with(http.request.uri.path, \".gif\") or ends_with(http.request.uri.path, \".webp\") or ends_with(http.request.uri.path, \".webmanifest\") or ends_with(http.request.uri.path, \".xml\") or ends_with(http.request.uri.path, \".js\") or ends_with(http.request.uri.path, \".css\"))",
+                  "description": "Serve Static Files",
+                  "action": "rewrite",
+                  "action_parameters": {
+                    "uri": {
+                      "path": {
+                        "expression": "concat(\"/${{ env.BUILD_PATH }}\", http.request.uri.path)"
+                      }
+                    }
+                  }
+                },
+                {
+                  "expression": "(not starts_with(http.request.uri.path, \"/assets/\") and not starts_with(http.request.uri.path, \"/p/\") and not ends_with(http.request.uri.path, \".png\") and not ends_with(http.request.uri.path, \".svg\") and not ends_with(http.request.uri.path, \".ico\") and not ends_with(http.request.uri.path, \".jpg\") and not ends_with(http.request.uri.path, \".jpeg\") and not ends_with(http.request.uri.path, \".gif\") and not ends_with(http.request.uri.path, \".webp\") and not ends_with(http.request.uri.path, \".webmanifest\") and not ends_with(http.request.uri.path, \".xml\") and not ends_with(http.request.uri.path, \".js\") and not ends_with(http.request.uri.path, \".css\"))",
+                  "description": "SPA Routing (exclude /p/ pages)",
+                  "action": "rewrite",
+                  "action_parameters": {
+                    "uri": {
+                      "path": {
+                        "value": "/${{ env.BUILD_PATH }}/index.html"
+                      }
+                    }
+                  }
+                }
+              ]
+            }'
+
+      - name: Update Cloudflare Redirect Rules
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+        run: |
+          curl -sf -X PUT "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/rulesets/phases/http_request_dynamic_redirect/entrypoint" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data '{
+              "rules": [
+                {
+                  "expression": "(starts_with(http.request.uri.path, \"/p/\"))",
+                  "description": "Redirect /p/ pages to API server",
+                  "action": "redirect",
+                  "action_parameters": {
+                    "from_value": {
+                      "status_code": 301,
+                      "target_url": {
+                        "expression": "concat(\"https://api.yourbro.ai\", http.request.uri.path)"
+                      },
+                      "preserve_query_string": true
+                    }
+                  }
+                }
+              ]
+            }'
+
+      - name: Purge Cloudflare cache
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+        run: |
+          curl -sf -X POST "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/purge_cache" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data '{"purge_everything": true}'
+          echo "Cache purged"
+
+      - name: Verify deployment
+        run: |
+          sleep 10
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' https://yourbro.ai/)
+          if [ "$STATUS" != "200" ]; then
+            echo "WARNING: Frontend returned $STATUS (may not be configured yet)"
+          else
+            echo "Frontend deployment verified (HTTP $STATUS)"
+          fi
+
+      - name: Print deployment info
+        run: |
+          echo "Deployed to: yourbro-web/${{ env.BUILD_PATH }}/"
+          echo "Transform rules updated to point to ${{ env.BUILD_PATH }}"

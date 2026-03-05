@@ -141,3 +141,12 @@ jobs:
             docker image prune -f
             echo "==> Deploy complete"
             docker compose ps
+
+            # Verify deployment
+            sleep 5
+            if curl -sf https://api.yourbro.ai/health > /dev/null; then
+              echo "==> Health check passed"
+            else
+              echo "==> WARNING: Health check failed"
+              docker compose logs --tail=20
+            fi

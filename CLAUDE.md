@@ -3,7 +3,7 @@
 ## Build & Run
 
 ### Architecture
-- **Frontend** (`web/`): Static site deployed to Cloudflare Workers at `yourbro.ai`
+- **Frontend** (`web/`): Static site deployed to Cloudflare R2 at `yourbro.ai` (versioned builds with Transform Rules)
 - **Backend API** (`api/`): Go server deployed to Hetzner VPS at `api.yourbro.ai`
 - **Agent** (`agent/`): Connects to API via WebSocket relay
 
@@ -26,7 +26,8 @@ Production API builds must be done via Docker Compose. Never run `go build` loca
 - **API**: Pushed via `.github/workflows/deploy.yml` (triggers on `api/`, `sdk/`, `migrations/`, `deploy/` changes)
 - **Frontend**: Pushed via `.github/workflows/web-deploy.yml` (triggers on `web/`, `sdk/` changes)
 
-The API `Dockerfile` builds SDK and Go API. Frontend is NOT embedded — it deploys independently to Cloudflare.
+The API `Dockerfile` builds SDK and Go API. Frontend is NOT embedded — it deploys independently to Cloudflare R2.
+`/p/{username}/{slug}` page routes are served by the API server. Cloudflare Redirect Rule sends `yourbro.ai/p/*` to `api.yourbro.ai/p/*`.
 
 ### Auth
 - Browser auth uses httpOnly `yb_session` cookie (cross-subdomain via `COOKIE_DOMAIN`)
