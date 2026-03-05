@@ -90,8 +90,17 @@ jobs:
         working-directory: release
         run: sha256sum * > checksums.txt
 
+      - uses: actions/checkout@v4
+
+      - name: Create tag (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git tag ${{ env.VERSION }}
+          git push origin ${{ env.VERSION }}
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.VERSION }}
           files: release/*
           generate_release_notes: true
