@@ -1,4 +1,4 @@
-name: Release Skill Package
+name: Create Skill Release Package
 
 on:
   push:
