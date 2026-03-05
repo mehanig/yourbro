@@ -57,8 +57,14 @@ func NewDB(path string) (*DB, error) {
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
 
-	// Migrations: add columns that may not exist in older databases
+	// Migrations: add columns/tables that may not exist in older databases
 	db.Exec(`ALTER TABLE authorized_keys ADD COLUMN x25519_public_key BLOB`) // ignore error if already exists
+	db.Exec(`CREATE TABLE IF NOT EXISTS pages (
+		slug         TEXT PRIMARY KEY,
+		title        TEXT NOT NULL DEFAULT '',
+		html_content TEXT NOT NULL,
+		updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`) // ignore error if already exists
 
 	d := &DB{db: db, authKeys: make(map[string]string)}
 	if err := d.reloadAuthKeys(); err != nil {
@@ -185,6 +191,64 @@ func (d *DB) List(slug, prefix string) ([]Entry, error) {
 		entries = append(entries, e)
 	}
 	return entries, nil
+}
+
+// --- Pages ---
+
+type Page struct {
+	Slug        string    `json:"slug"`
+	Title       string    `json:"title"`
+	HTMLContent string    `json:"html_content"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type PageSummary struct {
+	Slug      string    `json:"slug"`
+	Title     string    `json:"title"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (d *DB) GetPage(slug string) (*Page, error) {
+	var p Page
+	err := d.db.QueryRow(
+		`SELECT slug, title, html_content, updated_at FROM pages WHERE slug = ?`, slug,
+	).Scan(&p.Slug, &p.Title, &p.HTMLContent, &p.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (d *DB) UpsertPage(slug, title, htmlContent string) error {
+	_, err := d.db.Exec(`
+		INSERT INTO pages (slug, title, html_content, updated_at)
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT (slug) DO UPDATE SET title = excluded.title, html_content = excluded.html_content, updated_at = CURRENT_TIMESTAMP
+	`, slug, title, htmlContent)
+	return err
+}
+
+func (d *DB) DeletePage(slug string) error {
+	_, err := d.db.Exec(`DELETE FROM pages WHERE slug = ?`, slug)
+	return err
+}
+
+func (d *DB) ListPages() ([]PageSummary, error) {
+	rows, err := d.db.Query(`SELECT slug, title, updated_at FROM pages ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var pages []PageSummary
+	for rows.Next() {
+		var p PageSummary
+		if err := rows.Scan(&p.Slug, &p.Title, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		pages = append(pages, p)
+	}
+	return pages, nil
 }
 
 // --- Agent Identity (X25519) ---

@@ -39,6 +39,7 @@ func main() {
 	log.Printf("=== PAIRING CODE: %s (expires in 5 minutes) ===", pairingCode)
 
 	storageHandler := &handlers.StorageHandler{DB: db}
+	pagesHandler := &handlers.PagesHandler{DB: db}
 	pairHandler := &handlers.PairHandler{
 		DB:            db,
 		PairingCode:   pairingCode,
@@ -63,6 +64,15 @@ func main() {
 	r.Route("/api/keys", func(r chi.Router) {
 		r.Use(mw.VerifyUserSignature(db))
 		r.Delete("/", pairHandler.RevokeKey)
+	})
+
+	// Page routes — all public (relay auth verifies user owns the agent)
+	// Pages are managed via relay by the AI skill and dashboard.
+	r.Get("/api/pages", pagesHandler.List)
+	r.Route("/api/page/{slug}", func(r chi.Router) {
+		r.Get("/", pagesHandler.Get)
+		r.Put("/", pagesHandler.Upsert)
+		r.Delete("/", pagesHandler.Delete)
 	})
 
 	// Storage routes (require user signature — RFC 9421)

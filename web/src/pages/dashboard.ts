@@ -1,11 +1,10 @@
 import {
   API_BASE,
   getMe,
-  listPages,
+  listPagesViaRelay,
   listTokens,
   createToken,
   deleteToken,
-  deletePage,
   deleteAgent,
   logout,
   setLoggedIn,
@@ -115,6 +114,82 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
   });
 }
 
+/** Fetch and render pages from the first online agent via relay. */
+async function renderPagesList(agents: Agent[], username: string, container: HTMLElement) {
+  const pagesEl = container.querySelector("#pages-list");
+  if (!pagesEl) return;
+
+  const onlineAgent = agents.find(a => a.is_online);
+  if (!onlineAgent) {
+    pagesEl.innerHTML = '<p style="color:#656d76;">Agent offline — connect your agent to manage pages.</p>';
+    return;
+  }
+
+  pagesEl.innerHTML = '<p style="color:#656d76;">Loading pages from agent...</p>';
+
+  const pages = await listPagesViaRelay(onlineAgent.id);
+
+  if (pages.length === 0) {
+    pagesEl.innerHTML = '<p style="color:#656d76;">No pages yet. Use your AI agent to publish pages.</p>';
+    return;
+  }
+
+  pagesEl.innerHTML = pages.map((p: Page) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
+      <div>
+        <a href="/p/${esc(username)}/${esc(p.slug)}" target="_blank" style="color:#58a6ff;text-decoration:none;font-weight:600;">${esc(p.title || p.slug)}</a>
+        <span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">/${esc(username)}/${esc(p.slug)}</span>
+      </div>
+      <button class="delete-page" data-slug="${esc(p.slug)}" data-agent-id="${onlineAgent.id}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Delete</button>
+    </div>
+  `).join("");
+
+  // Bind delete handlers — delete via relay with RFC 9421 signature
+  pagesEl.querySelectorAll(".delete-page").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const slug = (btn as HTMLElement).dataset.slug!;
+      const agentId = (btn as HTMLElement).dataset.agentId!;
+      if (!confirm(`Delete page "${slug}"?`)) return;
+
+      try {
+        const { privateKey, publicKeyBytes } = await getOrCreateKeypair();
+        const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
+        const created = Math.floor(Date.now() / 1000);
+        const nonce = crypto.randomUUID();
+        const targetUri = `https://relay.internal/api/page/${encodeURIComponent(slug)}`;
+        const sigParams = `("@method" "@target-uri");created=${created};nonce="${nonce}";keyid="${pubKeyB64}"`;
+        const signatureBase = `"@method": DELETE\n"@target-uri": ${targetUri}\n"@signature-params": ${sigParams}`;
+        const sig = await crypto.subtle.sign("Ed25519", privateKey, new TextEncoder().encode(signatureBase));
+        const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
+
+        const res = await fetch(`${API_BASE}/api/relay/${agentId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            id: crypto.randomUUID(),
+            method: "DELETE",
+            path: `/api/page/${encodeURIComponent(slug)}`,
+            headers: {
+              "Signature-Input": `sig1=${sigParams}`,
+              "Signature": `sig1=:${sigB64}:`,
+            },
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: res.statusText }));
+          alert(`Delete failed: ${data.error || res.statusText}`);
+          return;
+        }
+        // Refresh pages list
+        renderPagesList(agents, username, container);
+      } catch (err) {
+        alert(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+  });
+}
+
 export async function renderDashboard(container: HTMLElement) {
   // Close previous SSE connection to prevent leaks on re-render
   if (activeSSE) {
@@ -133,10 +208,7 @@ export async function renderDashboard(container: HTMLElement) {
     return;
   }
 
-  const [pages, tokens] = await Promise.all([
-    listPages(),
-    listTokens(),
-  ]).then(([p, t]) => [p || [], t || []] as [Page[], Token[]]);
+  const tokens = (await listTokens()) || [];
 
   container.innerHTML = `
     <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;padding-bottom:1rem;border-bottom:1px solid #30363d;">
@@ -172,23 +244,7 @@ export async function renderDashboard(container: HTMLElement) {
     <section style="margin-bottom:2rem;">
       <h2 style="font-size:1.2rem;margin-bottom:1rem;">Pages</h2>
       <div id="pages-list">
-        ${
-          pages.length === 0
-            ? '<p style="color:#656d76;">No pages yet. Use an API token with an AI agent to publish pages.</p>'
-            : pages
-                .map(
-                  (p: Page) => `
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
-                  <div>
-                    <a href="/p/${esc(user.username)}/${esc(p.slug)}" target="_blank" style="color:#58a6ff;text-decoration:none;font-weight:600;">${esc(p.title || p.slug)}</a>
-                    <span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">/${esc(user.username)}/${esc(p.slug)}</span>
-                  </div>
-                  <button class="delete-page" data-id="${p.id}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Delete</button>
-                </div>
-              `
-                )
-                .join("")
-        }
+        <p style="color:#656d76;">Waiting for agent connection...</p>
       </div>
     </section>
 
@@ -220,10 +276,16 @@ export async function renderDashboard(container: HTMLElement) {
   // SSE for real-time agent status (cookie-based auth via withCredentials)
   activeSSE = new EventSource(`${API_BASE}/api/agents/stream`, { withCredentials: true });
   const evtSource = activeSSE;
+  let pagesLoaded = false;
   evtSource.onmessage = (event) => {
     try {
       const agents: Agent[] = JSON.parse(event.data);
       renderAgentsList(agents, container);
+      // Fetch pages from first online agent (once, or when first agent comes online)
+      if (!pagesLoaded && agents.some(a => a.is_online)) {
+        pagesLoaded = true;
+        renderPagesList(agents, user.username, container);
+      }
     } catch { /* ignore parse errors */ }
   };
   evtSource.onerror = () => {
@@ -232,7 +294,10 @@ export async function renderDashboard(container: HTMLElement) {
     activeSSE = null;
     // Load once as fallback
     import("../lib/api").then(({ listAgents }) => {
-      listAgents().then((agents) => renderAgentsList(agents || [], container));
+      listAgents().then((agents: Agent[]) => {
+        renderAgentsList(agents || [], container);
+        renderPagesList(agents || [], user.username, container);
+      });
     });
   };
 
@@ -253,15 +318,7 @@ export async function renderDashboard(container: HTMLElement) {
     window.location.reload();
   });
 
-  document.querySelectorAll(".delete-page").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const id = Number((btn as HTMLElement).dataset.id);
-      if (confirm("Delete this page?")) {
-        await deletePage(id);
-        renderDashboard(container);
-      }
-    });
-  });
+  // Page delete handlers are bound in renderPagesList()
 
   document.querySelectorAll(".delete-token").forEach((btn) => {
     btn.addEventListener("click", async () => {

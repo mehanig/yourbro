@@ -123,10 +123,6 @@ func main() {
 	log.Printf("Loaded SDK script (%d bytes)", len(sdkScript))
 
 	oauthCfg := auth.NewGoogleOAuthConfig()
-	pagesHandler := &handlers.PagesHandler{
-		DB:        db,
-		SDKScript: sdkScript,
-	}
 	keysHandler := &handlers.KeysHandler{DB: db}
 	sseBroker := handlers.NewSSEBroker(db)
 	sseBroker.StartStaleChecker(context.Background())
@@ -134,6 +130,11 @@ func main() {
 	sseBroker.Hub = relayHub
 	agentsHandler := &handlers.AgentsHandler{DB: db, Broker: sseBroker, Hub: relayHub}
 	relayHandler := &handlers.RelayHandler{Hub: relayHub}
+	pagesHandler := &handlers.PagesHandler{
+		DB:        db,
+		Hub:       relayHub,
+		SDKScript: sdkScript,
+	}
 
 	r := chi.NewRouter()
 
@@ -238,9 +239,8 @@ func main() {
 		http.Redirect(w, r, frontendURL+"/#/callback", http.StatusTemporaryRedirect)
 	})
 
-	// Public page rendering
+	// Public page rendering — shell fetches HTML from agent via relay
 	r.Get("/p/{username}/{slug}", pagesHandler.RenderPage)
-	r.Get("/api/pages/{id}/content", pagesHandler.RenderPageContent)
 
 	// Logout — clears httpOnly session cookie (no auth required)
 	r.Post("/api/logout", func(w http.ResponseWriter, r *http.Request) {
@@ -284,6 +284,18 @@ func main() {
 	// Authenticated API routes
 	r.Route("/api", func(r chi.Router) {
 		r.Use(middleware.RequireAuth(db))
+
+		// Short-lived content token for sandboxed iframes (can't send httpOnly cookies)
+		r.Get("/content-token", func(w http.ResponseWriter, r *http.Request) {
+			userID := middleware.GetUserID(r)
+			token, err := auth.CreateSessionToken(userID)
+			if err != nil {
+				http.Error(w, `{"error":"failed to create token"}`, http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"token": token})
+		})
 
 		// User info
 		r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
@@ -364,14 +376,8 @@ func main() {
 			json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 		})
 
-		// Pages
-		r.Route("/pages", func(r chi.Router) {
-			r.With(middleware.RequireScope("publish:pages")).Post("/", pagesHandler.Create)
-			r.With(middleware.RequireScope("read:pages")).Get("/", pagesHandler.List)
-			r.With(middleware.RequireScope("read:pages")).Get("/{id}", pagesHandler.Get)
-			r.With(middleware.RequireScope("read:pages")).Get("/{id}/content-meta", pagesHandler.ContentMeta)
-			r.Delete("/{id}", pagesHandler.Delete)
-		})
+		// Pages — removed. Pages are now stored on the agent and fetched via relay.
+		// The /p/{username}/{slug} shell handles all page rendering.
 
 		// Agents
 		r.Route("/agents", func(r chi.Router) {

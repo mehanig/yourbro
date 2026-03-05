@@ -53,6 +53,7 @@ function waitForKeypair(timeoutMs: number = 10000): Promise<ReceivedKeys> {
 export class ClawdStorage {
   private pageSlug: string;
   private agentId: string;
+  private apiBase: string;
   private cachedPrivateKey: CryptoKey | null = null;
   private cachedPubKeyB64: string | null = null;
   private initPromise: Promise<void> | null = null;
@@ -63,22 +64,27 @@ export class ClawdStorage {
   // JWT token extracted from iframe URL for authenticating relay requests
   private sessionToken: string | null = null;
 
-  private constructor(pageSlug: string, agentId: string) {
+  private constructor(pageSlug: string, agentId: string, apiBase: string) {
     this.pageSlug = pageSlug;
     this.agentId = agentId;
-    // Extract JWT from iframe URL query param (set by page host)
-    const params = new URLSearchParams(window.location.search);
-    this.sessionToken = params.get("token");
+    this.apiBase = apiBase;
+    // Extract JWT: try meta tag first (srcdoc iframes), then URL query param (legacy)
+    this.sessionToken = getMeta("clawd-session-token") || null;
+    if (!this.sessionToken) {
+      const params = new URLSearchParams(window.location.search);
+      this.sessionToken = params.get("token");
+    }
   }
 
   static async init(): Promise<ClawdStorage> {
     const slug = getMeta("clawd-page-slug");
     const agentId = getMeta("clawd-agent-id");
+    const apiBase = getMeta("clawd-api-base") || "";
 
     if (!slug || !agentId) {
       throw new Error("Missing clawd-page-slug or clawd-agent-id meta tags");
     }
-    const instance = new ClawdStorage(slug, agentId);
+    const instance = new ClawdStorage(slug, agentId, apiBase);
     await instance.ensureKeys();
     return instance;
   }
@@ -278,7 +284,7 @@ export class ClawdStorage {
     const hdrs: Record<string, string> = { "Content-Type": "application/json" };
     if (this.sessionToken) hdrs["Authorization"] = `Bearer ${this.sessionToken}`;
 
-    const res = await fetch(`/api/relay/${this.agentId}`, {
+    const res = await fetch(`${this.apiBase}/api/relay/${this.agentId}`, {
       method: "POST",
       headers: hdrs,
       body: JSON.stringify(envelope),

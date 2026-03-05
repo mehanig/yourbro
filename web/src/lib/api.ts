@@ -51,26 +51,35 @@ export function getMe(): Promise<User> {
   return request("/api/me");
 }
 
-// Pages
+// Pages (stored on agent, fetched via relay)
 export interface Page {
-  id: number;
   slug: string;
   title: string;
-  html_content?: string;
-  created_at: string;
   updated_at: string;
 }
 
-export function listPages(): Promise<Page[]> {
-  return request("/api/pages");
-}
-
-export function getPage(id: number): Promise<Page> {
-  return request(`/api/pages/${id}`);
-}
-
-export function deletePage(id: number): Promise<void> {
-  return request(`/api/pages/${id}`, { method: "DELETE" });
+/** Fetch page list from agent via relay. Returns empty array if agent is offline. */
+export async function listPagesViaRelay(agentId: number): Promise<Page[]> {
+  try {
+    const res = await fetch(`${API_BASE}/api/relay/${agentId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        id: crypto.randomUUID(),
+        method: "GET",
+        path: "/api/pages",
+      }),
+    });
+    if (!res.ok) return [];
+    const envelope = await res.json();
+    if (envelope.status === 200 && envelope.body) {
+      return JSON.parse(envelope.body) as Page[];
+    }
+    return [];
+  } catch {
+    return [];
+  }
 }
 
 // Tokens
