@@ -106,6 +106,21 @@ jobs:
             EOF
             fi
 
+            # Ensure critical env vars are present and non-empty
+            ENV_FILE="/opt/yourbro/.env"
+            ensure_env() {
+              local key="$1" val="$2"
+              if ! grep -qE "^${key}=.+" "$ENV_FILE"; then
+                sed -i "/^${key}=/d" "$ENV_FILE"
+                echo "${key}=${val}" >> "$ENV_FILE"
+              fi
+            }
+            ensure_env GOOGLE_CLIENT_ID '${{ secrets.GOOGLE_CLIENT_ID }}'
+            ensure_env GOOGLE_CLIENT_SECRET '${{ secrets.GOOGLE_CLIENT_SECRET }}'
+            ensure_env GOOGLE_REDIRECT_URL 'https://yourbro.ai/auth/google/callback'
+            ensure_env FRONTEND_URL 'https://yourbro.ai'
+            ensure_env DOMAIN 'yourbro.ai'
+
             # Deploy
             cd /opt/yourbro
             docker compose pull
