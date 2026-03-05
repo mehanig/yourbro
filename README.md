@@ -6,45 +6,45 @@ Platform for AI-published web pages with zero-trust agent storage. Your AI agent
 
 There are **two separate systems** working together:
 
-### 1. Page Publishing (AI Agent → yourbro server)
+### 1. Page Publishing (AI Agent → Agent via Relay)
 
-Your AI agent (Claude, etc.) publishes HTML pages to yourbro.ai using an API token. The page includes a `relay:{agent_id}` endpoint that routes data requests through the yourbro WebSocket relay to your agent.
+Your AI agent (Claude/ClawdBot) publishes HTML pages to your local agent via the yourbro WebSocket relay. The page content is stored in your agent's SQLite database — the yourbro server never sees or stores it.
 
 ```
-You (human)                     ClawdBot                         yourbro.ai
-    │                               │                               │
-    ├── Create API token ──────────>│                               │
-    │   (dashboard)                 │                               │
-    │                               ├── POST /api/pages ───────────>│
-    │                               │   {slug, html, agent_endpoint}│
-    │                               │                               ├── Store page metadata
-    │                               │                               │   (no user data)
+You (human)                     ClawdBot                         yourbro.ai                Your Agent
+    │                               │                               │                         │
+    ├── Create API token ──────────>│                               │                         │
+    │   (dashboard)                 │                               │                         │
+    │                               ├── POST /api/relay/AGENT_ID ──>│── WebSocket ───────────>│
+    │                               │   PUT /api/page/my-page       │   (pure relay pipe)     ├── Store in SQLite
+    │                               │                               │                         │   (your machine)
 ```
 
-### 2. Data Storage (Browser → Agent via WebSocket Relay)
+### 2. Page Viewing & Data Storage (Browser → Agent via Relay)
 
-When someone visits a page, the browser sends requests to the yourbro server which relays them to your agent via a persistent WebSocket connection. Your agent processes the request and responds via the same WebSocket. Auth uses Ed25519 keypairs with [RFC 9421 HTTP Message Signatures](https://www.rfc-editor.org/rfc/rfc9421).
+When someone visits a page, the browser fetches HTML from your agent through the relay. Storage operations use Ed25519 keypairs with [RFC 9421 HTTP Message Signatures](https://www.rfc-editor.org/rfc/rfc9421) and X25519 E2E encryption.
 
 ```
 PAIRING (one-time):
 
-Browser                              Agent Machine (via relay)
+Browser                              Agent (via relay)
 ┌──────────────────┐                ┌──────────────────┐
 │ Generate Ed25519 │                │ Print pairing    │
-│ keypair (WebCrypto)               │ code in logs     │
-│                  │                │                  │
+│ + X25519 keypairs│                │ code in logs     │
+│ (WebCrypto)      │                │                  │
 │ Enter code in    │                │                  │
 │ dashboard ───────┼── POST /pair ─>│ Verify code      │
-│                  │   (via relay)  │ Store public key │
+│                  │   (via relay)  │ Store public keys│
+│                  │<── agent key ──│ Return X25519 key│
 └──────────────────┘                └──────────────────┘
 
-RUNTIME (every request, signed per RFC 9421):
+RUNTIME (every request, E2E encrypted + signed per RFC 9421):
 
-Browser              yourbro.ai              ClawdBot
+Browser              yourbro.ai              Your Agent
    │                    │                       │
    │── POST /relay/ID ─>│── WebSocket msg ─────>│
-   │                    │                       │── verify Ed25519 signature
-   │                    │                       │── check timestamp ±5min
+   │   (E2E encrypted)  │   (opaque to server)  │── decrypt + verify signature
+   │                    │                       │── process request
    │                    │<── WebSocket resp ────│
    │<── JSON data ──────│                       │
 
@@ -120,21 +120,27 @@ This generates an Ed25519 keypair in your browser and registers it with the agen
 
 ### 6. Publish a Page
 
-Use your API token to publish a page with a relay agent endpoint:
+Pages are published to your agent via relay. Get your agent ID from the dashboard, then:
 
 ```bash
-curl -X POST http://localhost/api/pages \
+# Get agent ID
+AGENT_ID=$(curl -s http://localhost/api/agents \
+  -H "Authorization: Bearer YOUR_API_TOKEN" | jq '.[0].id')
+
+# Publish page via relay to agent
+curl -X POST "http://localhost/api/relay/$AGENT_ID" \
   -H "Authorization: Bearer YOUR_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "slug": "hello",
-    "title": "Hello World",
-    "html_content": "<html><head></head><body><h1>Loading...</h1><script>setTimeout(async()=>{const s=window.clawdStorage;if(!s)return;await s.set(\"msg\",\"Hello from agent storage!\");const v=await s.get(\"msg\");document.body.innerHTML=\"<h1>\"+v+\"</h1>\"},2000)</script></body></html>",
-    "agent_endpoint": "relay:AGENT_ID"
+    "id": "'"$(uuidgen)"'",
+    "method": "PUT",
+    "path": "/api/page/hello",
+    "headers": {"Content-Type": "application/json"},
+    "body": "{\"title\": \"Hello World\", \"html_content\": \"<html><body><h1>Hello from yourbro!</h1></body></html>\"}"
   }'
 ```
 
-Replace `AGENT_ID` with your agent's ID from the dashboard.
+The page is stored in your agent's SQLite — the server never sees it.
 
 ### 7. Visit Your Page
 
@@ -240,36 +246,35 @@ bash deploy/deploy.sh
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/health` | — | Health check |
-| GET | `/p/{username}/{slug}` | — | Render published page |
-| GET | `/api/pages/{id}/content` | JWT (query param) | Page iframe content |
+| GET | `/p/{username}/{slug}` | — | Render published page (fetches HTML from agent via relay) |
 | GET | `/api/me` | Bearer | Current user |
-| POST | `/api/pages` | Bearer | Create page (`slug`, `html_content`, `agent_endpoint`) |
-| GET | `/api/pages` | Bearer | List user's pages |
-| GET | `/api/pages/{id}` | Bearer | Get page |
-| GET | `/api/pages/{id}/content-meta` | Bearer | Get agent endpoint + slug |
-| DELETE | `/api/pages/{id}` | Bearer | Delete page |
-| POST | `/api/tokens` | Bearer | Create API token |
-| GET | `/api/tokens` | Bearer | List API tokens |
-| DELETE | `/api/tokens/{id}` | Bearer | Revoke API token |
-| POST | `/api/keys` | Bearer | Add public key |
-| GET | `/api/keys` | Bearer | List public keys |
-| DELETE | `/api/keys/{id}` | Bearer | Remove public key |
-| POST | `/api/agents` | Bearer | Register agent |
 | GET | `/api/agents` | Bearer | List agents (with online status) |
+| GET | `/api/agents/stream` | Bearer | SSE stream for real-time agent status |
 | DELETE | `/api/agents/{id}` | Bearer | Remove agent |
 | POST | `/api/relay/{agent_id}` | Bearer | Relay request to agent via WebSocket |
 | GET | `/ws/agent` | Bearer | WebSocket endpoint for agent connection |
+| POST | `/api/tokens` | Bearer | Create API token |
+| GET | `/api/tokens` | Bearer | List API tokens |
+| DELETE | `/api/tokens/{id}` | Bearer | Revoke API token |
 
-### Agent Data Server
+### Agent (reached via relay)
+
+All agent endpoints are accessed through `POST /api/relay/{agent_id}`. The relay envelope wraps the method, path, and headers.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/health` | — | Health check |
-| POST | `/api/pair` | Pairing code | Register browser's public key |
-| GET | `/api/storage/{slug}/{key}` | RFC 9421 sig | Get value |
-| PUT | `/api/storage/{slug}/{key}` | RFC 9421 sig | Set value |
-| GET | `/api/storage/{slug}?prefix=` | RFC 9421 sig | List keys |
-| DELETE | `/api/storage/{slug}/{key}` | RFC 9421 sig | Delete value |
+| POST | `/api/pair` | Pairing code | Register browser's public keys (Ed25519 + X25519) |
+| GET | `/api/auth-check` | RFC 9421 sig | Check if browser's key is authorized |
+| DELETE | `/api/keys` | RFC 9421 sig | Revoke browser's signing key |
+| GET | `/api/pages` | — | List all pages |
+| GET | `/api/page/{slug}` | — | Get page content |
+| PUT | `/api/page/{slug}` | — | Create or update page |
+| DELETE | `/api/page/{slug}` | — | Delete page |
+| GET | `/api/storage/{slug}/{key}` | RFC 9421 sig | Get storage value |
+| PUT | `/api/storage/{slug}/{key}` | RFC 9421 sig | Set storage value |
+| GET | `/api/storage/{slug}?prefix=` | RFC 9421 sig | List storage keys |
+| DELETE | `/api/storage/{slug}/{key}` | RFC 9421 sig | Delete storage value |
 
 ## Project Structure
 

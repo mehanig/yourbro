@@ -133,6 +133,10 @@ func (r *Router) handleCleartextRequest(ctx context.Context, req Request) Respon
 	// (matching what the SDK signed against)
 	httpReq.TLS = &tls.ConnectionState{}
 
+	// NewRequestWithContext leaves RequestURI empty; the auth middleware uses it
+	// to reconstruct @target-uri for RFC 9421 signature verification.
+	httpReq.RequestURI = req.Path
+
 	// Copy headers from relay message
 	for k, v := range req.Headers {
 		httpReq.Header.Set(k, v)
