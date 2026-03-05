@@ -1,0 +1,22 @@
+# Docker Compose for running yourbro-agent as a container
+# Usage: docker compose up -d
+services:
+  yourbro-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${AGENT_PORT:-9443}:${AGENT_PORT:-9443}"
+    volumes:
+      - agent-data:/data
+    environment:
+      AGENT_DOMAIN: ${AGENT_DOMAIN:-}
+      AGENT_PORT: ${AGENT_PORT:-9443}
+      SQLITE_PATH: /data/agent.db
+      YOURBRO_TOKEN: ${YOURBRO_TOKEN:-}
+      YB_SERVER_URL: ${YB_SERVER_URL:-}
+      YB_AGENT_ENDPOINT: ${YB_AGENT_ENDPOINT:-}
+    restart: unless-stopped
+
+volumes:
+  agent-data:

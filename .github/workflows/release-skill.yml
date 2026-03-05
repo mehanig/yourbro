@@ -1,0 +1,88 @@
+name: Release Skill Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-agent:
+    name: Build agent (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            runner: ubuntu-latest
+          - goos: darwin
+            goarch: arm64
+            runner: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Install CGO deps (Linux)
+        if: matrix.goos == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y gcc
+
+      - name: Build agent binary
+        working-directory: agent
+        env:
+          CGO_ENABLED: 1
+        run: |
+          go build -o ../yourbro-agent-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/server
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yourbro-agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: yourbro-agent-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  package-skill:
+    name: Package skill
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create skill zip
+        run: |
+          cd skill
+          zip -r ../yourbro-skill-${{ github.ref_name }}.zip \
+            SKILL.md \
+            scripts/ \
+            contrib/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yourbro-skill
+          path: yourbro-skill-${{ github.ref_name }}.zip
+
+  release:
+    name: Create GitHub Release
+    needs: [build-agent, package-skill]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release files
+        run: |
+          mkdir -p release
+          find artifacts -type f -name 'yourbro-*' -exec cp {} release/ \;
+
+      - name: Generate checksums
+        working-directory: release
+        run: sha256sum * > checksums.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true

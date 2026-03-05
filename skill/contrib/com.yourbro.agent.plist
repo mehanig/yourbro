@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.yourbro.agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/yourbro-agent</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>AGENT_PORT</key>
+        <string>9443</string>
+        <!-- Uncomment and set these for production use:
+        <key>AGENT_DOMAIN</key>
+        <string>agent.example.com</string>
+        <key>YOURBRO_TOKEN</key>
+        <string>yb_your_token</string>
+        <key>YB_SERVER_URL</key>
+        <string>https://yourbro.ai</string>
+        <key>YB_AGENT_ENDPOINT</key>
+        <string>https://agent.example.com:9443</string>
+        -->
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/yourbro-agent.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/yourbro-agent.err</string>
+</dict>
+</plist>

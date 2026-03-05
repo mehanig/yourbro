@@ -1,0 +1,32 @@
+[Unit]
+Description=yourbro Agent - Zero-trust data storage server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+ExecStart=/usr/local/bin/yourbro-agent
+Restart=on-failure
+RestartSec=5
+
+# Environment - edit these or use an EnvironmentFile
+Environment=AGENT_PORT=9443
+Environment=SQLITE_PATH=%h/.yourbro/agent.db
+# Environment=AGENT_DOMAIN=agent.example.com
+# Environment=YOURBRO_TOKEN=yb_your_token
+# Environment=YB_SERVER_URL=https://yourbro.ai
+# Environment=YB_AGENT_ENDPOINT=https://agent.example.com:9443
+
+# Or load from file:
+# EnvironmentFile=%h/.yourbro/agent.env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.yourbro
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

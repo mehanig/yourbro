@@ -1,0 +1,18 @@
+# Exclude everything except the skill package contents
+# Only SKILL.md, scripts/, and contrib/ are included
+
+*.env
+*.db
+*.log
+.git/
+.github/
+agent/
+api/
+web/
+sdk/
+migrations/
+nginx/
+deploy/
+docs/
+bin/
+node_modules/
