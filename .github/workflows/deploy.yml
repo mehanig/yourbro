@@ -35,18 +35,72 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH
+      - uses: actions/checkout@v4
+
+      - name: Copy deploy files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "deploy/docker-compose.prod.yml,deploy/nginx.conf,deploy/setup.sh,deploy/deploy.sh"
+          target: /tmp/yourbro-deploy
+          strip_components: 1
+
+      - name: Setup and deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
+          envs: AZ_REGISTRY_PASSWORD
           script: |
+            set -e
+
+            # First-time setup: install Docker if missing
+            if ! command -v docker &>/dev/null; then
+              echo "==> Installing Docker"
+              curl -fsSL https://get.docker.com | sh
+            fi
+
+            # Create deploy directory
+            mkdir -p /opt/yourbro/nginx
+
+            # Copy files from temp location
+            cp /tmp/yourbro-deploy/docker-compose.prod.yml /opt/yourbro/docker-compose.yml
+            cp /tmp/yourbro-deploy/nginx.conf /opt/yourbro/nginx/nginx.conf
+            cp /tmp/yourbro-deploy/deploy.sh /opt/yourbro/deploy.sh
+            chmod +x /opt/yourbro/deploy.sh
+            rm -rf /tmp/yourbro-deploy
+
+            # Login to Azure Container Registry
+            echo "${{ secrets.AZ_REGISTRY_PASSWORD }}" | docker login mehanig.azurecr.io -u mehanig --password-stdin
+
+            # Generate .env if first deploy
+            if [ ! -f /opt/yourbro/.env ]; then
+              echo "==> Generating .env with random secrets"
+              JWT_SECRET=$(openssl rand -hex 32)
+              INTERNAL_KEY=$(openssl rand -hex 32)
+              POSTGRES_PASS=$(openssl rand -hex 16)
+              cat > /opt/yourbro/.env <<EOF
+            DATABASE_URL=postgres://yourbro:${POSTGRES_PASS}@postgres:5432/yourbro?sslmode=disable
+            POSTGRES_PASSWORD=${POSTGRES_PASS}
+            JWT_SECRET=${JWT_SECRET}
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
+            GOOGLE_REDIRECT_URL=https://yourbro.ai/auth/google/callback
+            FRONTEND_URL=https://yourbro.ai
+            YOURBRO_INTERNAL_KEY=${INTERNAL_KEY}
+            DOMAIN=yourbro.ai
+            EOF
+            fi
+
+            # Deploy
             cd /opt/yourbro
             docker compose pull
             docker compose up -d
             sleep 3
             docker compose exec -T api ./server migrate
             docker image prune -f
-            echo "Deploy complete"
+            echo "==> Deploy complete"
             docker compose ps
