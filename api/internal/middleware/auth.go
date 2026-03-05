@@ -18,19 +18,22 @@ const (
 	UserKey   contextKey = "user"
 )
 
-// RequireAuth checks for a valid Bearer token (API token or session JWT).
+// RequireAuth checks for a valid session cookie or Bearer token (API token).
+// Browser requests use httpOnly cookie; agent/API requests use Bearer token.
 func RequireAuth(db *storage.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			header := r.Header.Get("Authorization")
-			// Fallback to httpOnly cookie for SSE (EventSource can't set headers)
+			// Primary: httpOnly session cookie (browser requests)
+			header := ""
+			if cookie, err := r.Cookie("yb_session"); err == nil {
+				header = "Bearer " + cookie.Value
+			}
+			// Fallback: Authorization header (API tokens, agents)
 			if header == "" {
-				if cookie, err := r.Cookie("yb_session"); err == nil {
-					header = "Bearer " + cookie.Value
-				}
+				header = r.Header.Get("Authorization")
 			}
 			if header == "" {
-				http.Error(w, `{"error":"missing authorization header"}`, http.StatusUnauthorized)
+				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 				return
 			}
 
