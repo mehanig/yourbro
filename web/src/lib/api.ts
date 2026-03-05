@@ -1,42 +1,40 @@
-const API_BASE = "";
+export const API_BASE = import.meta.env.VITE_API_URL || "";
 
-function getToken(): string | null {
-  return localStorage.getItem("yb_session");
-}
-
-export function setToken(token: string) {
-  localStorage.setItem("yb_session", token);
-}
-
-export function clearToken() {
-  localStorage.removeItem("yb_session");
+// Login state: httpOnly cookie holds the session, localStorage flag is for UI only
+export function setLoggedIn(loggedIn: boolean) {
+  if (loggedIn) {
+    localStorage.setItem("yb_logged_in", "1");
+  } else {
+    localStorage.removeItem("yb_logged_in");
+  }
 }
 
 export function isLoggedIn(): boolean {
-  return !!getToken();
+  return localStorage.getItem("yb_logged_in") === "1";
 }
 
 async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
 
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers,
+    credentials: "include",
   });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error || res.statusText);
+  }
+
+  if (res.status === 204) {
+    return undefined as T;
   }
 
   return res.json();
@@ -130,4 +128,9 @@ export function registerAgent(name: string): Promise<Agent> {
 
 export function deleteAgent(id: number): Promise<void> {
   return request(`/api/agents/${id}`, { method: "DELETE" });
+}
+
+export async function logout(): Promise<void> {
+  await request("/api/logout", { method: "POST" });
+  setLoggedIn(false);
 }

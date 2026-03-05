@@ -1,4 +1,5 @@
 import {
+  API_BASE,
   getMe,
   listPages,
   listTokens,
@@ -6,7 +7,8 @@ import {
   deleteToken,
   deletePage,
   deleteAgent,
-  clearToken,
+  logout,
+  setLoggedIn,
   type User,
   type Page,
   type Token,
@@ -82,9 +84,10 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
         const sig = await crypto.subtle.sign("Ed25519", (await getOrCreateKeypair()).privateKey, new TextEncoder().encode(signatureBase));
         const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
 
-        const res = await fetch(`/api/relay/${id}`, {
+        const res = await fetch(`${API_BASE}/api/relay/${id}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({
             id: crypto.randomUUID(),
             method: "DELETE",
@@ -125,8 +128,8 @@ export async function renderDashboard(container: HTMLElement) {
   try {
     user = await getMe();
   } catch {
-    clearToken();
-    window.location.hash = "#/login";
+    setLoggedIn(false);
+    window.location.hash = "#/";
     return;
   }
 
@@ -214,8 +217,8 @@ export async function renderDashboard(container: HTMLElement) {
     </section>
   `;
 
-  // SSE for real-time agent status (cookie-based auth, no token in URL)
-  activeSSE = new EventSource("/api/agents/stream");
+  // SSE for real-time agent status (cookie-based auth via withCredentials)
+  activeSSE = new EventSource(`${API_BASE}/api/agents/stream`, { withCredentials: true });
   const evtSource = activeSSE;
   evtSource.onmessage = (event) => {
     try {
@@ -245,9 +248,8 @@ export async function renderDashboard(container: HTMLElement) {
   document.getElementById("logout-btn")?.addEventListener("click", async () => {
     evtSource.close();
     activeSSE = null;
-    await fetch("/api/logout", { method: "POST" });
-    clearToken();
-    window.location.hash = "#/login";
+    await logout();
+    window.location.hash = "#/";
     window.location.reload();
   });
 
@@ -325,9 +327,10 @@ export async function renderDashboard(container: HTMLElement) {
       const x25519kp = await getOrCreateX25519Keypair();
       const x25519PubB64 = base64RawUrlEncode(x25519kp.publicKeyBytes);
 
-      const res = await fetch(`/api/relay/${agentId}`, {
+      const res = await fetch(`${API_BASE}/api/relay/${agentId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({
           id: crypto.randomUUID(),
           method: "POST",

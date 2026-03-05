@@ -1,4 +1,4 @@
-import { isLoggedIn, setToken } from "./lib/api";
+import { isLoggedIn, setLoggedIn, getMe } from "./lib/api";
 import { renderLogin } from "./pages/login";
 import { renderDashboard } from "./pages/dashboard";
 import { renderHowToUse } from "./pages/how-to-use";
@@ -14,15 +14,19 @@ function route() {
     return;
   }
 
-  // Handle OAuth callback
+  // Handle OAuth callback — session is in httpOnly cookie, verify with /api/me
   if (hash.startsWith("#/callback")) {
-    const params = new URLSearchParams(hash.split("?")[1] || "");
-    const token = params.get("token");
-    if (token) {
-      setToken(token);
-      window.location.hash = "#/dashboard";
-      return;
-    }
+    getMe()
+      .then(() => {
+        setLoggedIn(true);
+        window.location.hash = "#/dashboard";
+      })
+      .catch(() => {
+        setLoggedIn(false);
+        window.location.hash = "#/";
+      });
+    app.innerHTML = '<p style="text-align:center;padding:2rem;color:#8b949e;">Signing in...</p>';
+    return;
   }
 
   if (!isLoggedIn()) {
