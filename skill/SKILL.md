@@ -74,8 +74,8 @@ Set it in your OpenClaw configuration:
 The `yourbro-agent` binary is your personal data storage server. Set your API token and server URL, then start it:
 
 ```bash
-export YB_API_TOKEN="yb_your_token_here"
-export YB_SERVER_URL="https://yourbro.ai"
+export YOURBRO_TOKEN="yb_your_token_here"
+export YOURBRO_SERVER_URL="https://yourbro.ai"
 yourbro-agent
 ```
 
@@ -106,32 +106,13 @@ Pages with agent storage automatically use the relay — the SDK routes requests
 
 ## Configuration
 
-### Relay mode (recommended)
-
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `YOURBRO_TOKEN` | Yes | -- | API token from yourbro.ai dashboard |
-| `YB_API_TOKEN` | Yes | -- | Same token, used by the agent for WebSocket auth |
-| `YB_SERVER_URL` | Yes | -- | yourbro server URL (e.g., `https://yourbro.ai`) |
-| `YB_AGENT_NAME` | No | `relay-agent` | Name shown in dashboard |
+| `YOURBRO_TOKEN` | Yes | -- | API token from yourbro.ai dashboard (used by both ClawdBot and the agent) |
+| `YOURBRO_SERVER_URL` | Yes | -- | yourbro server URL (e.g., `https://yourbro.ai`) |
 | `SQLITE_PATH` | No | `~/.yourbro/agent.db` | SQLite database path |
 
-Two env vars (`YB_API_TOKEN` + `YB_SERVER_URL`) are all you need. The agent auto-detects relay mode when `AGENT_PORT` and `AGENT_DOMAIN` are not set.
-
-### Direct mode (advanced)
-
-For users who want to expose their agent on a public port with TLS:
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `YOURBRO_TOKEN` | Yes | -- | API token from yourbro.ai dashboard |
-| `AGENT_PORT` | No | `9443` | Port the agent listens on |
-| `AGENT_DOMAIN` | No | -- | Domain for automatic TLS via Let's Encrypt |
-| `SQLITE_PATH` | No | `~/.yourbro/agent.db` | SQLite database path |
-| `YB_SERVER_URL` | No | -- | yourbro server URL for heartbeat |
-| `YB_AGENT_ENDPOINT` | No | -- | Public URL of this agent for heartbeat |
-
-Set agent environment variables before starting `yourbro-agent`, or use the systemd/launchd service files in `contrib/`.
+Two env vars (`YOURBRO_TOKEN` + `YOURBRO_SERVER_URL`) are all you need.
 
 ## Usage
 
@@ -158,7 +139,7 @@ When the user asks you to publish a page or create a web page on yourbro:
        "agent_endpoint": "relay:AGENT_ID"
      }'
    ```
-   Replace `AGENT_ID` with your agent's ID from the dashboard. For direct-mode agents, use the full endpoint URL instead (e.g., `https://agent.example.com:9443`).
+   Replace `AGENT_ID` with your agent's ID from the dashboard.
 
 4. **Share the URL**: `https://yourbro.ai/p/USERNAME/SLUG`
 
@@ -226,24 +207,6 @@ const keys = await storage.list("dashboard-");
 // Delete
 await storage.delete("old-key");
 ```
-
-### Page with agent-backed storage (direct mode)
-
-For direct-mode agents, use the agent's public endpoint URL:
-
-```bash
-curl -X POST https://yourbro.ai/api/pages \
-  -H "Authorization: Bearer $YOURBRO_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "slug": "my-page",
-    "title": "My Page",
-    "html_content": "<html>...</html>",
-    "agent_endpoint": "https://agent.example.com:9443"
-  }'
-```
-
-The same ClawdStorage SDK works in both modes — mode detection is automatic.
 
 ### Update an existing page
 

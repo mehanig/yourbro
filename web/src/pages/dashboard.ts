@@ -5,7 +5,6 @@ import {
   createToken,
   deleteToken,
   deletePage,
-  registerAgent,
   deleteAgent,
   clearToken,
   type User,
@@ -19,7 +18,6 @@ import {
   storeAgentX25519Key,
   base64RawUrlEncode,
   base64RawUrlDecode,
-  signedFetch,
 } from "../lib/crypto";
 
 /** Active SSE connection — closed before re-render to prevent leaks. */
@@ -42,10 +40,10 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
   // Update relay agent dropdown for pairing
   const relaySelect = container.querySelector("#pair-relay-agent") as HTMLSelectElement | null;
   if (relaySelect) {
-    const unpairedRelay = agents.filter(a => !a.endpoint && a.is_online);
-    relaySelect.innerHTML = unpairedRelay.length === 0
-      ? '<option value="">No relay agents online</option>'
-      : unpairedRelay.map(a => `<option value="${a.id}">${esc(a.name || "unnamed")} (#${a.id})</option>`).join("");
+    const onlineAgents = agents.filter(a => a.is_online);
+    relaySelect.innerHTML = onlineAgents.length === 0
+      ? '<option value="">No agents online</option>'
+      : onlineAgents.map(a => `<option value="${a.id}">${esc(a.name || "unnamed")} (#${a.id})</option>`).join("");
   }
 
   listEl.innerHTML =
@@ -53,24 +51,17 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
       ? '<p style="color:#656d76;">No agents paired yet.</p>'
       : agents
           .map(
-            (a) => {
-              const isRelay = !a.endpoint;
-              const modeLabel = isRelay
-                ? '<span style="color:#58a6ff;font-size:0.75rem;padding:0.1rem 0.4rem;background:#0d2a4a;border-radius:4px;margin-left:0.5rem;">relay</span>'
-                : `<span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">${esc(a.endpoint || "")}</span>`;
-              return `
+            (a) => `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
             <div style="display:flex;align-items:center;gap:0.75rem;">
               <span style="color:${a.is_online ? "#3fb950" : "#656d76"};font-size:1.2rem;">${a.is_online ? "●" : "○"}</span>
               <div>
                 <span style="font-weight:600;">${esc(a.name || "unnamed")}</span>
-                ${modeLabel}
               </div>
             </div>
-            <button class="delete-agent" data-id="${a.id}" data-endpoint="${esc(a.endpoint || "")}" data-relay="${isRelay}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Remove</button>
+            <button class="delete-agent" data-id="${a.id}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Remove</button>
           </div>
-        `;
-            }
+        `
           )
           .join("");
 
@@ -78,61 +69,43 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
   listEl.querySelectorAll(".delete-agent").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = Number((btn as HTMLElement).dataset.id);
-      const endpoint = (btn as HTMLElement).dataset.endpoint;
-      const isRelay = (btn as HTMLElement).dataset.relay === "true";
       if (!confirm("Remove this agent?")) return;
 
-      // Step 1: Revoke key on agent — must succeed before removing server record
-      if (isRelay) {
-        // Relay mode: send revoke through relay endpoint
-        try {
-          const { publicKeyBytes } = await getOrCreateKeypair();
-          const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
-          const created = Math.floor(Date.now() / 1000);
-          const nonce = crypto.randomUUID();
-          const sigParams = `("@method" "@target-uri");created=${created};nonce="${nonce}";keyid="${pubKeyB64}"`;
-          const signatureBase = `"@method": DELETE\n"@target-uri": https://relay.internal/api/keys\n"@signature-params": ${sigParams}`;
-          const sig = await crypto.subtle.sign("Ed25519", (await getOrCreateKeypair()).privateKey, new TextEncoder().encode(signatureBase));
-          const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
+      // Revoke key on agent via relay
+      try {
+        const { publicKeyBytes } = await getOrCreateKeypair();
+        const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
+        const created = Math.floor(Date.now() / 1000);
+        const nonce = crypto.randomUUID();
+        const sigParams = `("@method" "@target-uri");created=${created};nonce="${nonce}";keyid="${pubKeyB64}"`;
+        const signatureBase = `"@method": DELETE\n"@target-uri": https://relay.internal/api/keys\n"@signature-params": ${sigParams}`;
+        const sig = await crypto.subtle.sign("Ed25519", (await getOrCreateKeypair()).privateKey, new TextEncoder().encode(signatureBase));
+        const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
 
-          const res = await fetch(`/api/relay/${id}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              id: crypto.randomUUID(),
-              method: "DELETE",
-              path: "/api/keys",
-              headers: {
-                "Signature-Input": `sig1=${sigParams}`,
-                "Signature": `sig1=:${sigB64}:`,
-              },
-            }),
-          });
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({ error: res.statusText }));
-            alert(`Can't unpair: ${data.error || res.statusText}`);
-            return;
-          }
-        } catch (err) {
-          alert("Can't unpair: relay failed.\n" + (err instanceof Error ? err.message : String(err)));
+        const res = await fetch(`/api/relay/${id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: crypto.randomUUID(),
+            method: "DELETE",
+            path: "/api/keys",
+            headers: {
+              "Signature-Input": `sig1=${sigParams}`,
+              "Signature": `sig1=:${sigB64}:`,
+            },
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: res.statusText }));
+          alert(`Can't unpair: ${data.error || res.statusText}`);
           return;
         }
-      } else if (endpoint) {
-        // Direct mode: send revoke directly to agent
-        try {
-          const res = await signedFetch("DELETE", `${endpoint}/api/keys`);
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({ error: res.statusText }));
-            alert(`Can't unpair: ${data.error || res.statusText}`);
-            return;
-          }
-        } catch {
-          alert("Can't unpair: agent is offline or unreachable.\nTry again when the agent is back online.");
-          return;
-        }
+      } catch (err) {
+        alert("Can't unpair: relay failed.\n" + (err instanceof Error ? err.message : String(err)));
+        return;
       }
 
-      // Step 2: Agent confirmed revocation — now safe to remove from server
+      // Agent confirmed revocation — now safe to remove from server
       await deleteAgent(id);
       renderDashboard(container);
     });
@@ -183,18 +156,11 @@ export async function renderDashboard(container: HTMLElement) {
     <section style="margin-bottom:2rem;">
       <h2 style="font-size:1.2rem;margin-bottom:1rem;">Pair New Agent</h2>
       <p style="color:#8b949e;margin-bottom:1rem;font-size:0.9rem;">
-        <strong>Relay agents</strong> connect via WebSocket — select one from the list above and enter its pairing code.<br/>
-        <strong>Direct agents</strong> need an endpoint URL, pairing code, and optional name.
+        Select an online relay agent and enter its pairing code to pair.
       </p>
       <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
-        <select id="pair-mode" style="padding:0.5rem;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;">
-          <option value="relay">Relay agent</option>
-          <option value="direct">Direct agent</option>
-        </select>
         <select id="pair-relay-agent" style="padding:0.5rem;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;min-width:160px;"></select>
-        <input id="pair-endpoint" type="text" placeholder="http://localhost:9443" style="flex:1;min-width:200px;padding:0.5rem;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;display:none;" />
         <input id="pair-code" type="text" placeholder="Pairing code" style="width:140px;padding:0.5rem;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;font-family:monospace;" />
-        <input id="pair-name" type="text" placeholder="Name (optional)" style="width:160px;padding:0.5rem;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;display:none;" />
         <button id="pair-btn" style="padding:0.5rem 1rem;background:#1a2e1d;border:1px solid #2a5a30;color:#3fb950;border-radius:6px;cursor:pointer;">Pair</button>
       </div>
       <div id="pair-status" style="margin-top:0.75rem;display:none;padding:0.75rem;border-radius:8px;font-size:0.9rem;"></div>
@@ -318,27 +284,14 @@ export async function renderDashboard(container: HTMLElement) {
       document.getElementById("new-token-value")!.textContent = resp.token;
     });
 
-  // Mode switching for pair form
-  const pairMode = document.getElementById("pair-mode") as HTMLSelectElement;
-  const pairEndpointInput = document.getElementById("pair-endpoint") as HTMLInputElement;
-  const pairNameInput = document.getElementById("pair-name") as HTMLInputElement;
   const pairRelaySelect = document.getElementById("pair-relay-agent") as HTMLSelectElement;
 
-  function updatePairMode() {
-    const isRelay = pairMode.value === "relay";
-    pairEndpointInput.style.display = isRelay ? "none" : "block";
-    pairNameInput.style.display = isRelay ? "none" : "block";
-    pairRelaySelect.style.display = isRelay ? "block" : "none";
-  }
-  pairMode.addEventListener("change", updatePairMode);
-  updatePairMode();
-
   document.getElementById("pair-btn")?.addEventListener("click", async () => {
-    const isRelay = pairMode.value === "relay";
     const code = (
       document.getElementById("pair-code") as HTMLInputElement
     ).value.trim();
     const status = document.getElementById("pair-status")!;
+    const agentId = pairRelaySelect.value;
 
     if (!code) {
       status.style.display = "block";
@@ -349,118 +302,36 @@ export async function renderDashboard(container: HTMLElement) {
       return;
     }
 
-    if (isRelay) {
-      // Relay mode pairing — send through relay endpoint
-      const agentId = pairRelaySelect.value;
-      if (!agentId) {
-        status.style.display = "block";
-        status.style.background = "#2d1214";
-        status.style.border = "1px solid #5a1d22";
-        status.style.color = "#f85149";
-        status.textContent = "Select a relay agent to pair with.";
-        return;
-      }
-
+    if (!agentId) {
       status.style.display = "block";
-      status.style.background = "#161b22";
-      status.style.border = "1px solid #30363d";
-      status.style.color = "#8b949e";
-      status.textContent = "Pairing via relay...";
+      status.style.background = "#2d1214";
+      status.style.border = "1px solid #5a1d22";
+      status.style.color = "#f85149";
+      status.textContent = "Select an online agent to pair with.";
+      return;
+    }
 
-      try {
-        const { publicKeyBytes } = await getOrCreateKeypair();
-        const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
+    status.style.display = "block";
+    status.style.background = "#161b22";
+    status.style.border = "1px solid #30363d";
+    status.style.color = "#8b949e";
+    status.textContent = "Pairing via relay...";
 
-        // Get X25519 keypair for E2E encryption
-        const x25519kp = await getOrCreateX25519Keypair();
-        const x25519PubB64 = base64RawUrlEncode(x25519kp.publicKeyBytes);
+    try {
+      const { publicKeyBytes } = await getOrCreateKeypair();
+      const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
 
-        const res = await fetch(`/api/relay/${agentId}`, {
+      // Get X25519 keypair for E2E encryption
+      const x25519kp = await getOrCreateX25519Keypair();
+      const x25519PubB64 = base64RawUrlEncode(x25519kp.publicKeyBytes);
+
+      const res = await fetch(`/api/relay/${agentId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: crypto.randomUUID(),
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: crypto.randomUUID(),
-            method: "POST",
-            path: "/api/pair",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              pairing_code: code,
-              user_public_key: pubKeyB64,
-              user_x25519_public_key: x25519PubB64,
-              username: user.username,
-            }),
-          }),
-        });
-
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({ error: res.statusText }));
-          status.style.background = "#2d1214";
-          status.style.border = "1px solid #5a1d22";
-          status.style.color = "#f85149";
-          status.textContent = `Pairing failed: ${data.error || res.statusText}`;
-          return;
-        }
-
-        // Store agent's X25519 public key for E2E encryption
-        const pairResp = await res.json().catch(() => ({}));
-        let fingerprint = "";
-        if (pairResp.agent_x25519_public_key) {
-          const agentX25519Bytes = base64RawUrlDecode(pairResp.agent_x25519_public_key);
-          await storeAgentX25519Key(agentId, agentX25519Bytes);
-          fingerprint = pairResp.agent_x25519_public_key.substring(0, 8);
-        }
-
-        status.style.background = "#0f1a10";
-        status.style.border = "1px solid #1b3a20";
-        status.style.color = "#3fb950";
-        if (fingerprint) {
-          status.innerHTML = "";
-          status.appendChild(document.createTextNode("Paired successfully via relay! "));
-          const fpSpan = document.createElement("span");
-          fpSpan.style.cssText = "font-family:monospace;background:#161b22;padding:2px 6px;border-radius:3px;border:1px solid #30363d;color:#58a6ff";
-          fpSpan.textContent = "E2E: " + fingerprint;
-          fpSpan.title = "Verify this matches the fingerprint shown in your agent terminal";
-          status.appendChild(fpSpan);
-        } else {
-          status.textContent = "Paired successfully via relay!";
-        }
-      } catch (err: unknown) {
-        status.style.display = "block";
-        status.style.background = "#2d1214";
-        status.style.border = "1px solid #5a1d22";
-        status.style.color = "#f85149";
-        status.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
-      }
-    } else {
-      // Direct mode pairing — same as before
-      const endpoint = pairEndpointInput.value.trim().replace(/\/$/, "");
-      const name = pairNameInput.value.trim() || new URL(endpoint || "http://unknown").hostname;
-
-      if (!endpoint) {
-        status.style.display = "block";
-        status.style.background = "#2d1214";
-        status.style.border = "1px solid #5a1d22";
-        status.style.color = "#f85149";
-        status.textContent = "Endpoint URL is required for direct mode.";
-        return;
-      }
-
-      status.style.display = "block";
-      status.style.background = "#161b22";
-      status.style.border = "1px solid #30363d";
-      status.style.color = "#8b949e";
-      status.textContent = "Generating keypair and pairing...";
-
-      try {
-        const { publicKeyBytes } = await getOrCreateKeypair();
-        const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
-
-        // Get X25519 keypair for E2E encryption
-        const x25519kp = await getOrCreateX25519Keypair();
-        const x25519PubB64 = base64RawUrlEncode(x25519kp.publicKeyBytes);
-
-        const res = await fetch(`${endpoint}/api/pair`, {
-          method: "POST",
+          path: "/api/pair",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             pairing_code: code,
@@ -468,55 +339,47 @@ export async function renderDashboard(container: HTMLElement) {
             user_x25519_public_key: x25519PubB64,
             username: user.username,
           }),
-        });
+        }),
+      });
 
-        const data = await res.json();
-        if (!res.ok) {
-          status.style.background = "#2d1214";
-          status.style.border = "1px solid #5a1d22";
-          status.style.color = "#f85149";
-          status.textContent = `Pairing failed: ${data.error || res.statusText}`;
-          return;
-        }
-
-        // Store agent's X25519 key if provided
-        let directFingerprint = "";
-        if (data.agent_x25519_public_key) {
-          directFingerprint = data.agent_x25519_public_key.substring(0, 8);
-        }
-
-        status.textContent = "Registering agent on server...";
-        try {
-          await registerAgent(endpoint, name);
-        } catch (regErr: unknown) {
-          status.style.background = "#1a1700";
-          status.style.border = "1px solid #3d3517";
-          status.style.color = "#d29922";
-          status.textContent = `Paired, but server registration failed: ${regErr instanceof Error ? regErr.message : String(regErr)}. Heartbeat won't work.`;
-          return;
-        }
-
-        status.style.background = "#0f1a10";
-        status.style.border = "1px solid #1b3a20";
-        status.style.color = "#3fb950";
-        if (directFingerprint) {
-          status.innerHTML = "";
-          status.appendChild(document.createTextNode("Paired and registered! "));
-          const fpSpan = document.createElement("span");
-          fpSpan.style.cssText = "font-family:monospace;background:#161b22;padding:2px 6px;border-radius:3px;border:1px solid #30363d;color:#58a6ff";
-          fpSpan.textContent = "E2E: " + directFingerprint;
-          fpSpan.title = "Verify this matches the fingerprint shown in your agent terminal";
-          status.appendChild(fpSpan);
-        } else {
-          status.textContent = "Paired and registered successfully!";
-        }
-      } catch (err: unknown) {
-        status.style.display = "block";
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: res.statusText }));
         status.style.background = "#2d1214";
         status.style.border = "1px solid #5a1d22";
         status.style.color = "#f85149";
-        status.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
+        status.textContent = `Pairing failed: ${data.error || res.statusText}`;
+        return;
       }
+
+      // Store agent's X25519 public key for E2E encryption
+      const pairResp = await res.json().catch(() => ({}));
+      let fingerprint = "";
+      if (pairResp.agent_x25519_public_key) {
+        const agentX25519Bytes = base64RawUrlDecode(pairResp.agent_x25519_public_key);
+        await storeAgentX25519Key(agentId, agentX25519Bytes);
+        fingerprint = pairResp.agent_x25519_public_key.substring(0, 8);
+      }
+
+      status.style.background = "#0f1a10";
+      status.style.border = "1px solid #1b3a20";
+      status.style.color = "#3fb950";
+      if (fingerprint) {
+        status.innerHTML = "";
+        status.appendChild(document.createTextNode("Paired successfully! "));
+        const fpSpan = document.createElement("span");
+        fpSpan.style.cssText = "font-family:monospace;background:#161b22;padding:2px 6px;border-radius:3px;border:1px solid #30363d;color:#58a6ff";
+        fpSpan.textContent = "E2E: " + fingerprint;
+        fpSpan.title = "Verify this matches the fingerprint shown in your agent terminal";
+        status.appendChild(fpSpan);
+      } else {
+        status.textContent = "Paired successfully!";
+      }
+    } catch (err: unknown) {
+      status.style.display = "block";
+      status.style.background = "#2d1214";
+      status.style.border = "1px solid #5a1d22";
+      status.style.color = "#f85149";
+      status.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
     }
   });
 }

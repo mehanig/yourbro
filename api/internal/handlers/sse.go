@@ -16,7 +16,8 @@ import (
 
 // SSEBroker manages per-user SSE connections and broadcasts agent status updates.
 type SSEBroker struct {
-	DB *storage.DB
+	DB  *storage.DB
+	Hub interface{ IsOnline(int64) bool } // set after Hub is created
 
 	mu        sync.Mutex
 	clients   map[int64]map[chan []byte]struct{} // userID -> set of channels
@@ -77,6 +78,13 @@ func (b *SSEBroker) sendAgents(userID int64) {
 	}
 	if agents == nil {
 		agents = []models.Agent{}
+	}
+
+	// Enrich with online status from Hub
+	if b.Hub != nil {
+		for i := range agents {
+			agents[i].IsOnline = b.Hub.IsOnline(agents[i].ID)
+		}
 	}
 
 	data, err := json.Marshal(agents)

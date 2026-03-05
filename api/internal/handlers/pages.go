@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,7 +20,6 @@ var slugRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
 type PagesHandler struct {
 	DB        *storage.DB
-	AllowHTTP bool   // allow http:// agent endpoints (dev mode)
 	SDKScript string // inline SDK JavaScript (set at startup)
 }
 
@@ -47,20 +45,14 @@ func (h *PagesHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate agent endpoint URL if provided
+	// Validate agent endpoint — must be relay mode ("relay:{agent_id}")
 	var agentEndpoint *string
 	if req.AgentEndpoint != "" {
-		if strings.HasPrefix(req.AgentEndpoint, "relay:") {
-			// Relay mode: agent_endpoint is "relay:{agent_id}" — no URL validation needed
-			agentEndpoint = &req.AgentEndpoint
-		} else {
-			u, err := url.Parse(req.AgentEndpoint)
-			if err != nil || (u.Scheme != "https" && !(h.AllowHTTP && u.Scheme == "http")) {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_endpoint must be a valid HTTPS URL"})
-				return
-			}
-			agentEndpoint = &req.AgentEndpoint
+		if !strings.HasPrefix(req.AgentEndpoint, "relay:") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_endpoint must use relay mode (relay:{agent_id})"})
+			return
 		}
+		agentEndpoint = &req.AgentEndpoint
 	}
 
 	page, err := h.DB.CreatePage(r.Context(), userID, req.Slug, req.Title, req.HTMLContent, agentEndpoint)
@@ -141,10 +133,8 @@ func (h *PagesHandler) RenderPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hasAgent := page.AgentEndpoint != nil && *page.AgentEndpoint != ""
-	isRelay := hasAgent && strings.HasPrefix(*page.AgentEndpoint, "relay:")
-
 	var agentID string
-	if isRelay {
+	if hasAgent {
 		agentID = strings.TrimPrefix(*page.AgentEndpoint, "relay:")
 	}
 
@@ -156,7 +146,7 @@ func (h *PagesHandler) RenderPage(w http.ResponseWriter, r *http.Request) {
 		"Username": username,
 		"Slug":     slug,
 		"HasAgent": hasAgent,
-		"IsRelay":  isRelay,
+		"IsRelay":  hasAgent,
 		"AgentID":  agentID,
 	})
 }
@@ -206,30 +196,18 @@ func (h *PagesHandler) RenderPageContent(w http.ResponseWriter, r *http.Request)
 		// SDK is inlined because sandbox="allow-scripts" (no allow-same-origin)
 		// prevents the iframe from loading external scripts from the parent origin.
 		// Auth is handled by the SDK via user keypair Ed25519 signatures (RFC 9421).
-		if agentID, ok := strings.CutPrefix(*page.AgentEndpoint, "relay:"); ok {
-			// Relay mode: inject relay meta tags instead of agent endpoint
-			metaTags = fmt.Sprintf(
-				`<meta name="clawd-relay-mode" content="true">`+"\n"+
-					`<meta name="clawd-agent-id" content="%s">`+"\n"+
-					`<meta name="clawd-page-slug" content="%s">`+"\n"+
-					`<script>%s</script>`,
-				template.HTMLEscapeString(agentID),
-				template.HTMLEscapeString(page.Slug),
-				h.SDKScript,
-			)
-			csp += " connect-src 'self';"
-		} else {
-			// Direct mode: inject agent endpoint
-			metaTags = fmt.Sprintf(
-				`<meta name="clawd-agent-endpoint" content="%s">`+"\n"+
-					`<meta name="clawd-page-slug" content="%s">`+"\n"+
-					`<script>%s</script>`,
-				template.HTMLEscapeString(*page.AgentEndpoint),
-				template.HTMLEscapeString(page.Slug),
-				h.SDKScript,
-			)
-			csp += " connect-src 'self' " + *page.AgentEndpoint + ";"
-		}
+		// Relay mode: inject relay meta tags
+		agentID := strings.TrimPrefix(*page.AgentEndpoint, "relay:")
+		metaTags = fmt.Sprintf(
+			`<meta name="clawd-relay-mode" content="true">`+"\n"+
+				`<meta name="clawd-agent-id" content="%s">`+"\n"+
+				`<meta name="clawd-page-slug" content="%s">`+"\n"+
+				`<script>%s</script>`,
+			template.HTMLEscapeString(agentID),
+			template.HTMLEscapeString(page.Slug),
+			h.SDKScript,
+		)
+		csp += " connect-src 'self';"
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

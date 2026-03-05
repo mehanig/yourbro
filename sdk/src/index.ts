@@ -51,9 +51,7 @@ function waitForKeypair(timeoutMs: number = 10000): Promise<ReceivedKeys> {
 }
 
 export class ClawdStorage {
-  private agentEndpoint: string;
   private pageSlug: string;
-  private mode: 'direct' | 'relay';
   private agentId: string;
   private cachedPrivateKey: CryptoKey | null = null;
   private cachedPubKeyB64: string | null = null;
@@ -65,10 +63,8 @@ export class ClawdStorage {
   // JWT token extracted from iframe URL for authenticating relay requests
   private sessionToken: string | null = null;
 
-  private constructor(agentEndpoint: string, pageSlug: string, mode: 'direct' | 'relay', agentId: string) {
-    this.agentEndpoint = agentEndpoint.replace(/\/$/, "");
+  private constructor(pageSlug: string, agentId: string) {
     this.pageSlug = pageSlug;
-    this.mode = mode;
     this.agentId = agentId;
     // Extract JWT from iframe URL query param (set by page host)
     const params = new URLSearchParams(window.location.search);
@@ -76,21 +72,13 @@ export class ClawdStorage {
   }
 
   static async init(): Promise<ClawdStorage> {
-    const endpoint = getMeta("clawd-agent-endpoint");
     const slug = getMeta("clawd-page-slug");
-    const relayMode = getMeta("clawd-relay-mode") === "true";
     const agentId = getMeta("clawd-agent-id");
 
-    if (relayMode && slug && agentId) {
-      const instance = new ClawdStorage("", slug, "relay", agentId);
-      await instance.ensureKeys();
-      return instance;
+    if (!slug || !agentId) {
+      throw new Error("Missing clawd-page-slug or clawd-agent-id meta tags");
     }
-
-    if (!endpoint || !slug) {
-      throw new Error("Missing clawd-agent-endpoint or clawd-page-slug meta tags");
-    }
-    const instance = new ClawdStorage(endpoint, slug, "direct", "");
+    const instance = new ClawdStorage(slug, agentId);
     await instance.ensureKeys();
     return instance;
   }
@@ -189,62 +177,9 @@ export class ClawdStorage {
     return new Uint8Array(pt);
   }
 
-  private async signedFetch(
-    method: string,
-    path: string,
-    body?: string
-  ): Promise<Response> {
-    await this.ensureKeys();
-    const url = `${this.agentEndpoint}${path}`;
-    const created = Math.floor(Date.now() / 1000);
-    const nonce = crypto.randomUUID();
-
-    // Content-Digest for body (RFC 9530)
-    let contentDigest = "";
-    if (body) {
-      const hash = await crypto.subtle.digest(
-        "SHA-256",
-        new TextEncoder().encode(body)
-      );
-      contentDigest = `sha-256=:${base64StdEncode(new Uint8Array(hash))}:`;
-    }
-
-    // RFC 9421 signature base
-    const coveredComponents = body
-      ? '("@method" "@target-uri" "content-digest")'
-      : '("@method" "@target-uri")';
-    const sigParams = `${coveredComponents};created=${created};nonce="${nonce}";keyid="${this.cachedPubKeyB64}"`;
-
-    const lines: string[] = [
-      `"@method": ${method}`,
-      `"@target-uri": ${url}`,
-    ];
-    if (contentDigest) lines.push(`"content-digest": ${contentDigest}`);
-    lines.push(`"@signature-params": ${sigParams}`);
-    const signatureBase = lines.join("\n");
-
-    const sig = await crypto.subtle.sign(
-      "Ed25519",
-      this.cachedPrivateKey!,
-      new TextEncoder().encode(signatureBase)
-    );
-    const sigB64 = base64StdEncode(new Uint8Array(sig));
-
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "Signature-Input": `sig1=${sigParams}`,
-      Signature: `sig1=:${sigB64}:`,
-    };
-    if (contentDigest) headers["Content-Digest"] = contentDigest;
-
-    return fetch(url, { method, headers, body });
-  }
-
   async get<T = unknown>(key: string): Promise<T | null> {
     const path = `/api/storage/${encodeURIComponent(this.pageSlug)}/${encodeURIComponent(key)}`;
-    const res = this.mode === 'relay'
-      ? await this.relayRequest("GET", path)
-      : await this.signedFetch("GET", path);
+    const res = await this.relayRequest("GET", path);
     if (!res.ok) return null;
     const data = await res.json();
     return JSON.parse(data.value) as T;
@@ -253,18 +188,14 @@ export class ClawdStorage {
   async set(key: string, value: unknown): Promise<boolean> {
     const body = JSON.stringify(value);
     const path = `/api/storage/${encodeURIComponent(this.pageSlug)}/${encodeURIComponent(key)}`;
-    const res = this.mode === 'relay'
-      ? await this.relayRequest("PUT", path, body)
-      : await this.signedFetch("PUT", path, body);
+    const res = await this.relayRequest("PUT", path, body);
     return res.ok;
   }
 
   async list(prefix: string = ""): Promise<string[]> {
     const params = prefix ? `?prefix=${encodeURIComponent(prefix)}` : "";
     const path = `/api/storage/${encodeURIComponent(this.pageSlug)}${params}`;
-    const res = this.mode === 'relay'
-      ? await this.relayRequest("GET", path)
-      : await this.signedFetch("GET", path);
+    const res = await this.relayRequest("GET", path);
     if (!res.ok) return [];
     const entries: Array<{ key: string }> = await res.json();
     return entries.map((e) => e.key);
@@ -272,9 +203,7 @@ export class ClawdStorage {
 
   async delete(key: string): Promise<boolean> {
     const path = `/api/storage/${encodeURIComponent(this.pageSlug)}/${encodeURIComponent(key)}`;
-    const res = this.mode === 'relay'
-      ? await this.relayRequest("DELETE", path)
-      : await this.signedFetch("DELETE", path);
+    const res = await this.relayRequest("DELETE", path);
     return res.ok;
   }
 
@@ -393,11 +322,10 @@ declare global {
 
 window.ClawdStorage = ClawdStorage;
 
-const endpointMeta = getMeta("clawd-agent-endpoint");
 const slugMeta = getMeta("clawd-page-slug");
-const relayModeMeta = getMeta("clawd-relay-mode") === "true";
+const agentIdMeta = getMeta("clawd-agent-id");
 
-if ((endpointMeta && slugMeta) || (relayModeMeta && slugMeta)) {
+if (slugMeta && agentIdMeta) {
   ClawdStorage.init()
     .then((storage) => {
       window.clawdStorage = storage;

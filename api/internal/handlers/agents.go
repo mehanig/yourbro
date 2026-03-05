@@ -26,12 +26,7 @@ func (h *AgentsHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var endpoint *string
-	if req.Endpoint != "" {
-		endpoint = &req.Endpoint
-	}
-
-	agent, err := h.DB.CreateAgent(r.Context(), userID, req.Name, endpoint)
+	agent, err := h.DB.CreateAgent(r.Context(), userID, req.Name)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to register agent"})
 		return
@@ -52,12 +47,10 @@ func (h *AgentsHandler) List(w http.ResponseWriter, r *http.Request) {
 		agents = []models.Agent{}
 	}
 
-	// Relay-mode agents: check WebSocket hub for online status
+	// Check WebSocket hub for online status
 	if h.Hub != nil {
 		for i := range agents {
-			if agents[i].Endpoint == nil {
-				agents[i].IsOnline = h.Hub.IsOnline(agents[i].ID)
-			}
+			agents[i].IsOnline = h.Hub.IsOnline(agents[i].ID)
 		}
 	}
 
@@ -78,30 +71,4 @@ func (h *AgentsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
-func (h *AgentsHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
-	userID := middleware.GetUserID(r)
-
-	var req models.HeartbeatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-		return
-	}
-
-	if req.Endpoint == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "endpoint is required"})
-		return
-	}
-
-	if err := h.DB.UpdateHeartbeat(r.Context(), userID, req.Endpoint); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent not found"})
-		return
-	}
-
-	if h.Broker != nil {
-		h.Broker.NotifyUser(userID)
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

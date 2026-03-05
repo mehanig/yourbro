@@ -178,8 +178,8 @@ Rename the compiled binary from `agent-server` to `yourbro-agent` for clarity an
    - File: `agent/cmd/server/main.go`
 
 6. **Unify token naming**
-   - Rename `YB_API_TOKEN` to `YOURBRO_TOKEN` in agent code
-   - Keep `YB_API_TOKEN` as a fallback alias for backwards compatibility (check both, prefer `YOURBRO_TOKEN`)
+   - Rename `YOURBRO_TOKEN` to `YOURBRO_TOKEN` in agent code
+   - Keep `YOURBRO_TOKEN` as a fallback alias for backwards compatibility (check both, prefer `YOURBRO_TOKEN`)
    - File: `agent/cmd/server/main.go`
 
 7. **Add SIGHUP handler for new pairing code**
@@ -331,7 +331,7 @@ Rename the compiled binary from `agent-server` to `yourbro-agent` for clarity an
 - [ ] CORS origins configurable via `CORS_ORIGINS` env var
 - [ ] TLS cert cache path configurable via `CERT_CACHE_PATH` env var
 - [ ] `YOURBRO_TOKEN` env var works for both publishing and heartbeat
-- [ ] `YB_API_TOKEN` still works as backwards-compatible alias
+- [ ] `YOURBRO_TOKEN` still works as backwards-compatible alias
 - [ ] Docker Compose workflow still works for self-hosting users
 - [ ] No secrets present in the published skill package
 
@@ -426,7 +426,7 @@ Rename the compiled binary from `agent-server` to `yourbro-agent` for clarity an
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `YOURBRO_TOKEN` | Yes (for publishing + heartbeat) | — | API token from yourbro dashboard |
-| `YB_SERVER_URL` | No (enables heartbeat) | — | yourbro server URL (e.g., `https://yourbro.ai`) |
+| `YOURBRO_SERVER_URL` | No (enables heartbeat) | — | yourbro server URL (e.g., `https://yourbro.ai`) |
 | `YB_AGENT_ENDPOINT` | No (enables heartbeat) | — | Public URL of this agent (e.g., `https://agent.example.com:9443`) |
 | `AGENT_PORT` | No | `9443` | Port the agent listens on |
 | `AGENT_DOMAIN` | No | — | Domain for autocert TLS (omit for dev/plain HTTP) |

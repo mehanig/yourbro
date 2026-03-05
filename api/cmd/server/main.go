@@ -131,13 +131,13 @@ func main() {
 	oauthCfg := auth.NewGoogleOAuthConfig()
 	pagesHandler := &handlers.PagesHandler{
 		DB:        db,
-		AllowHTTP: os.Getenv("ALLOW_HTTP_AGENT") == "true",
 		SDKScript: sdkScript,
 	}
 	keysHandler := &handlers.KeysHandler{DB: db}
 	sseBroker := handlers.NewSSEBroker(db)
 	sseBroker.StartStaleChecker(context.Background())
 	relayHub := relay.NewHub(db, sseBroker.NotifyUser)
+	sseBroker.Hub = relayHub
 	agentsHandler := &handlers.AgentsHandler{DB: db, Broker: sseBroker, Hub: relayHub}
 	relayHandler := &handlers.RelayHandler{Hub: relayHub}
 
@@ -215,7 +215,7 @@ func main() {
 			Value:    token,
 			Path:     "/",
 			HttpOnly: true,
-			Secure:   os.Getenv("AGENT_DOMAIN") != "", // true in production (HTTPS)
+			Secure:   os.Getenv("ENVIRONMENT") == "production",
 			SameSite: http.SameSiteLaxMode,
 			MaxAge:   7 * 24 * 60 * 60, // 7 days, matches JWT expiry
 		})
@@ -369,8 +369,7 @@ func main() {
 			r.Post("/", agentsHandler.Register)
 			r.Get("/", agentsHandler.List)
 			r.Delete("/{id}", agentsHandler.Delete)
-			r.Post("/heartbeat", agentsHandler.Heartbeat)
-			r.Get("/stream", sseBroker.ServeHTTP)
+		r.Get("/stream", sseBroker.ServeHTTP)
 		})
 
 		// Relay — forward requests to relay-mode agents via WebSocket

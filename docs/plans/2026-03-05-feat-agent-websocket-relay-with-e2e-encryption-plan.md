@@ -108,7 +108,7 @@ Establish the WebSocket infrastructure. Agent connects to server, server can rel
 
 **File: `agent/internal/relay/client.go` (new)**
 
-- On boot, agent dials `wss://{YB_SERVER_URL}/ws/agent` with `Authorization: Bearer {YB_API_TOKEN}`
+- On boot, agent dials `wss://{YOURBRO_SERVER_URL}/ws/agent` with `Authorization: Bearer {YOURBRO_TOKEN}`
 - Reconnection: exponential backoff (1s → 60s max, 10% jitter), retry indefinitely
 - Use native WebSocket ping/pong (no application-level ping)
 - Connection IS the heartbeat — server marks agent online when WS is open, offline on close
@@ -362,7 +362,7 @@ Without this, nginx will close WebSocket connections as regular HTTP.
 
 **File: `skill/SKILL.md` (modify)**
 
-> **Research insight (agent-native reviewer):** Update setup instructions for relay mode. The simplified config (just `YB_API_TOKEN` + `YB_SERVER_URL`) should be the default/recommended path. Direct mode becomes the "advanced" option for users who want it.
+> **Research insight (agent-native reviewer):** Update setup instructions for relay mode. The simplified config (just `YOURBRO_TOKEN` + `YOURBRO_SERVER_URL`) should be the default/recommended path. Direct mode becomes the "advanced" option for users who want it.
 
 ---
 
@@ -532,15 +532,15 @@ Current agent env vars (direct mode):
 ```
 AGENT_DOMAIN=my-agent.example.com
 AGENT_PORT=9443
-YB_API_TOKEN=xxx
-YB_SERVER_URL=https://yourbro.ai
+YOURBRO_TOKEN=xxx
+YOURBRO_SERVER_URL=https://yourbro.ai
 YB_AGENT_ENDPOINT=https://my-agent.example.com:9443
 ```
 
 Relay mode:
 ```
-YB_API_TOKEN=xxx
-YB_SERVER_URL=wss://yourbro.ai
+YOURBRO_TOKEN=xxx
+YOURBRO_SERVER_URL=wss://yourbro.ai
 ```
 
 Two env vars instead of five. No domain, no port, no TLS.

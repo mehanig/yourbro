@@ -57,7 +57,7 @@ func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request, userID int64
 	agent, err := h.DB.GetAgentByUserAndName(r.Context(), userID, agentName)
 	if err != nil {
 		// Create a new relay-mode agent
-		agent, err = h.DB.CreateAgent(r.Context(), userID, agentName, nil)
+		agent, err = h.DB.CreateAgent(r.Context(), userID, agentName)
 		if err != nil {
 			http.Error(w, "failed to register agent", http.StatusInternalServerError)
 			return
@@ -85,8 +85,7 @@ func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request, userID int64
 	h.agents[agent.ID] = ac
 	h.mu.Unlock()
 
-	// Update heartbeat and notify SSE
-	_ = h.DB.UpdateHeartbeatByID(r.Context(), agent.ID)
+	// Notify SSE of new connection
 	if h.Notify != nil {
 		h.Notify(userID)
 	}

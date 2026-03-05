@@ -11,12 +11,9 @@ Restart=on-failure
 RestartSec=5
 
 # Environment - edit these or use an EnvironmentFile
-Environment=AGENT_PORT=9443
 Environment=SQLITE_PATH=%h/.yourbro/agent.db
-# Environment=AGENT_DOMAIN=agent.example.com
 # Environment=YOURBRO_TOKEN=yb_your_token
-# Environment=YB_SERVER_URL=https://yourbro.ai
-# Environment=YB_AGENT_ENDPOINT=https://agent.example.com:9443
+# Environment=YOURBRO_SERVER_URL=https://yourbro.ai
 
 # Or load from file:
 # EnvironmentFile=%h/.yourbro/agent.env

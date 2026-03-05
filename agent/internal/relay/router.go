@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -127,6 +128,10 @@ func (r *Router) handleCleartextRequest(ctx context.Context, req Request) Respon
 		body := `{"error":"failed to build request"}`
 		return Response{ID: req.ID, Status: 500, Body: &body}
 	}
+
+	// Mark as TLS so the auth middleware reconstructs @target-uri with https://
+	// (matching what the SDK signed against)
+	httpReq.TLS = &tls.ConnectionState{}
 
 	// Copy headers from relay message
 	for k, v := range req.Headers {
