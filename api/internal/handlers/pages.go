@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -145,6 +143,11 @@ func (h *PagesHandler) RenderPage(w http.ResponseWriter, r *http.Request) {
 	hasAgent := page.AgentEndpoint != nil && *page.AgentEndpoint != ""
 	isRelay := hasAgent && strings.HasPrefix(*page.AgentEndpoint, "relay:")
 
+	var agentID string
+	if isRelay {
+		agentID = strings.TrimPrefix(*page.AgentEndpoint, "relay:")
+	}
+
 	tmpl := template.Must(template.New("page").Parse(pageHostTemplate))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	tmpl.Execute(w, map[string]any{
@@ -154,6 +157,7 @@ func (h *PagesHandler) RenderPage(w http.ResponseWriter, r *http.Request) {
 		"Slug":     slug,
 		"HasAgent": hasAgent,
 		"IsRelay":  isRelay,
+		"AgentID":  agentID,
 	})
 }
 
@@ -173,12 +177,9 @@ func (h *PagesHandler) RenderPageContent(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Generate CSP nonce for inline SDK script
-	nonceBytes := make([]byte, 16)
-	rand.Read(nonceBytes)
-	cspNonce := base64.StdEncoding.EncodeToString(nonceBytes)
-
-	csp := fmt.Sprintf("default-src 'self' https:; script-src 'nonce-%s'; style-src 'self' 'unsafe-inline' https:; img-src *; media-src *;", cspNonce)
+	// The iframe sandbox (allow-scripts only, no allow-same-origin) is the security boundary.
+	// Use 'unsafe-inline' so user page content with inline event handlers (onclick etc.) works.
+	csp := "default-src 'self' https:; script-src 'unsafe-inline'; style-src 'self' 'unsafe-inline' https:; img-src *; media-src *;"
 	var metaTags string
 
 	if page.AgentEndpoint != nil && *page.AgentEndpoint != "" {
@@ -205,17 +206,15 @@ func (h *PagesHandler) RenderPageContent(w http.ResponseWriter, r *http.Request)
 		// SDK is inlined because sandbox="allow-scripts" (no allow-same-origin)
 		// prevents the iframe from loading external scripts from the parent origin.
 		// Auth is handled by the SDK via user keypair Ed25519 signatures (RFC 9421).
-		if strings.HasPrefix(*page.AgentEndpoint, "relay:") {
+		if agentID, ok := strings.CutPrefix(*page.AgentEndpoint, "relay:"); ok {
 			// Relay mode: inject relay meta tags instead of agent endpoint
-			agentID := strings.TrimPrefix(*page.AgentEndpoint, "relay:")
 			metaTags = fmt.Sprintf(
 				`<meta name="clawd-relay-mode" content="true">`+"\n"+
 					`<meta name="clawd-agent-id" content="%s">`+"\n"+
 					`<meta name="clawd-page-slug" content="%s">`+"\n"+
-					`<script nonce="%s">%s</script>`,
+					`<script>%s</script>`,
 				template.HTMLEscapeString(agentID),
 				template.HTMLEscapeString(page.Slug),
-				cspNonce,
 				h.SDKScript,
 			)
 			csp += " connect-src 'self';"
@@ -224,10 +223,9 @@ func (h *PagesHandler) RenderPageContent(w http.ResponseWriter, r *http.Request)
 			metaTags = fmt.Sprintf(
 				`<meta name="clawd-agent-endpoint" content="%s">`+"\n"+
 					`<meta name="clawd-page-slug" content="%s">`+"\n"+
-					`<script nonce="%s">%s</script>`,
+					`<script>%s</script>`,
 				template.HTMLEscapeString(*page.AgentEndpoint),
 				template.HTMLEscapeString(page.Slug),
-				cspNonce,
 				h.SDKScript,
 			)
 			csp += " connect-src 'self' " + *page.AgentEndpoint + ";"
@@ -239,8 +237,6 @@ func (h *PagesHandler) RenderPageContent(w http.ResponseWriter, r *http.Request)
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	if metaTags != "" {
 		content := page.HTMLContent
-		// Add nonce to user's <script> tags so they execute under the CSP
-		content = addNonceToScripts(content, cspNonce)
 		if idx := strings.Index(strings.ToLower(content), "</head>"); idx >= 0 {
 			content = content[:idx] + metaTags + "\n" + content[idx:]
 		} else if idx := strings.Index(strings.ToLower(content), "<head>"); idx >= 0 {
@@ -307,12 +303,19 @@ const pageHostTemplate = `<!DOCTYPE html>
                 return;
             }
 
-            // Load keypair from IndexedDB (stored by dashboard pairing flow)
+            // Load keypairs from IndexedDB (stored by dashboard pairing flow)
             var kp = null;
+            var x25519kp = null;
+            var agentX25519Key = null;
             try {
                 var db = await new Promise(function(res, rej) {
-                    var req = indexedDB.open('clawd-keys', 1);
-                    req.onupgradeneeded = function() { req.result.createObjectStore('keypair'); };
+                    var req = indexedDB.open('clawd-keys', 2);
+                    req.onupgradeneeded = function() {
+                        var d = req.result;
+                        if (!d.objectStoreNames.contains('keypair')) d.createObjectStore('keypair');
+                        if (!d.objectStoreNames.contains('x25519')) d.createObjectStore('x25519');
+                        if (!d.objectStoreNames.contains('agent-keys')) d.createObjectStore('agent-keys');
+                    };
                     req.onsuccess = function() { res(req.result); };
                     req.onerror = function() { rej(req.error); };
                 });
@@ -322,6 +325,22 @@ const pageHostTemplate = `<!DOCTYPE html>
                     req.onsuccess = function() { res(req.result || null); };
                     req.onerror = function() { rej(req.error); };
                 });
+                // Load X25519 keypair for E2E encryption
+                x25519kp = await new Promise(function(res, rej) {
+                    var tx = db.transaction('x25519', 'readonly');
+                    var req = tx.objectStore('x25519').get('default');
+                    req.onsuccess = function() { res(req.result || null); };
+                    req.onerror = function() { rej(req.error); };
+                });
+                {{if .IsRelay}}
+                // Load agent's X25519 public key for relay E2E
+                agentX25519Key = await new Promise(function(res, rej) {
+                    var tx = db.transaction('agent-keys', 'readonly');
+                    var req = tx.objectStore('agent-keys').get('x25519-{{.AgentID}}');
+                    req.onsuccess = function() { res(req.result || null); };
+                    req.onerror = function() { rej(req.error); };
+                });
+                {{end}}
             } catch(e) { /* IndexedDB not available */ }
 
             if (!kp) {
@@ -338,14 +357,22 @@ const pageHostTemplate = `<!DOCTYPE html>
             container.appendChild(iframe);
             document.body.appendChild(container);
 
-            // Send keypair to sandboxed iframe via postMessage.
+            // Send keypairs to sandboxed iframe via postMessage.
             // CryptoKey objects are structured-cloneable (even non-extractable ones).
             iframe.addEventListener('load', function() {
-                iframe.contentWindow.postMessage({
+                var msg = {
                     type: 'clawd-keypair',
                     privateKey: kp.privateKey,
                     publicKeyBytes: kp.publicKeyBytes
-                }, '*');
+                };
+                if (x25519kp) {
+                    msg.x25519PrivateKey = x25519kp.privateKey;
+                    msg.x25519PublicKeyBytes = x25519kp.publicKeyBytes;
+                }
+                if (agentX25519Key) {
+                    msg.agentX25519PublicKeyBytes = agentX25519Key;
+                }
+                iframe.contentWindow.postMessage(msg, '*');
             });
         })();
     </script>
@@ -360,18 +387,6 @@ const pageHostTemplate = `<!DOCTYPE html>
     {{end}}
 </body>
 </html>`
-
-var scriptTagRe = regexp.MustCompile(`(?i)(<script)([\s>])`)
-
-// addNonceToScripts adds a CSP nonce attribute to all <script> tags in the HTML.
-func addNonceToScripts(html, nonce string) string {
-	nonceAttr := ` nonce="` + nonce + `"`
-	return scriptTagRe.ReplaceAllStringFunc(html, func(match string) string {
-		// Insert nonce after "<script"
-		return match[:7] + nonceAttr + match[7:]
-	})
-}
-
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/mehanig/yourbro/agent/internal/e2e"
 	"github.com/mehanig/yourbro/agent/internal/handlers"
 	mw "github.com/mehanig/yourbro/agent/internal/middleware"
 	"github.com/mehanig/yourbro/agent/internal/relay"
@@ -89,7 +90,16 @@ func main() {
 		log.Printf("=== RELAY MODE ===")
 		log.Printf("Connecting to %s via WebSocket (no exposed port)", serverURL)
 
-		router := &relay.Router{Mux: r}
+		// Initialize E2E encryption if agent has an identity
+		var cipherCache *e2e.CipherCache
+		if identity, err := db.GetOrCreateIdentity(); err != nil {
+			log.Printf("WARNING: E2E encryption disabled: %v", err)
+		} else {
+			cipherCache = e2e.NewCipherCache(identity.X25519PrivateKey)
+			log.Printf("E2E encryption enabled (X25519 pub: %x...)", identity.X25519PublicKey.Bytes()[:8])
+		}
+
+		router := &relay.Router{Mux: r, CipherCache: cipherCache, DB: db}
 		client := &relay.Client{
 			ServerURL: serverURL,
 			APIToken:  apiToken,

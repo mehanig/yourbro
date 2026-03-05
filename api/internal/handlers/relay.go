@@ -47,7 +47,12 @@ func (h *RelayHandler) Relay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.ID == "" || req.Method == "" || req.Path == "" {
+	if req.ID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
+		return
+	}
+	// Encrypted requests carry method/path inside the encrypted payload — only require id
+	if !req.Encrypted && (req.Method == "" || req.Path == "") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id, method, and path are required"})
 		return
 	}
@@ -62,12 +67,6 @@ func (h *RelayHandler) Relay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Forward agent response headers
-	for k, v := range resp.Headers {
-		w.Header().Set(k, v)
-	}
-	w.WriteHeader(resp.Status)
-	if resp.Body != nil {
-		w.Write([]byte(*resp.Body))
-	}
+	// Always return the full JSON envelope — relay is just a pipe
+	writeJSON(w, http.StatusOK, resp)
 }

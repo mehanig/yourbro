@@ -84,18 +84,22 @@ type RegisterAgentRequest struct {
 }
 
 type RelayRequest struct {
-	ID      string            `json:"id"`
-	Method  string            `json:"method"`
-	Path    string            `json:"path"`
-	Headers map[string]string `json:"headers"`
-	Body    *string           `json:"body"`
+	ID        string            `json:"id"`
+	Method    string            `json:"method,omitempty"`
+	Path      string            `json:"path,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Body      *string           `json:"body,omitempty"`
+	Encrypted bool              `json:"encrypted,omitempty"`
+	Payload   string            `json:"payload,omitempty"` // base64 of IV + AES-GCM ciphertext
 }
 
 type RelayResponse struct {
-	ID      string            `json:"id"`
-	Status  int               `json:"status"`
-	Headers map[string]string `json:"headers"`
-	Body    *string           `json:"body"`
+	ID        string            `json:"id"`
+	Status    int               `json:"status,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Body      *string           `json:"body,omitempty"`
+	Encrypted bool              `json:"encrypted,omitempty"`
+	Payload   string            `json:"payload,omitempty"` // base64 of IV + AES-GCM ciphertext
 }
 
 // WireMessage is the WebSocket wire protocol envelope.

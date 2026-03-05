@@ -13,7 +13,14 @@ import {
   type Token,
   type Agent,
 } from "../lib/api";
-import { getOrCreateKeypair, base64RawUrlEncode, signedFetch } from "../lib/crypto";
+import {
+  getOrCreateKeypair,
+  getOrCreateX25519Keypair,
+  storeAgentX25519Key,
+  base64RawUrlEncode,
+  base64RawUrlDecode,
+  signedFetch,
+} from "../lib/crypto";
 
 /** Active SSE connection — closed before re-render to prevent leaks. */
 let activeSSE: EventSource | null = null;
@@ -364,6 +371,10 @@ export async function renderDashboard(container: HTMLElement) {
         const { publicKeyBytes } = await getOrCreateKeypair();
         const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
 
+        // Get X25519 keypair for E2E encryption
+        const x25519kp = await getOrCreateX25519Keypair();
+        const x25519PubB64 = base64RawUrlEncode(x25519kp.publicKeyBytes);
+
         const res = await fetch(`/api/relay/${agentId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -375,6 +386,7 @@ export async function renderDashboard(container: HTMLElement) {
             body: JSON.stringify({
               pairing_code: code,
               user_public_key: pubKeyB64,
+              user_x25519_public_key: x25519PubB64,
               username: user.username,
             }),
           }),
@@ -389,10 +401,29 @@ export async function renderDashboard(container: HTMLElement) {
           return;
         }
 
+        // Store agent's X25519 public key for E2E encryption
+        const pairResp = await res.json().catch(() => ({}));
+        let fingerprint = "";
+        if (pairResp.agent_x25519_public_key) {
+          const agentX25519Bytes = base64RawUrlDecode(pairResp.agent_x25519_public_key);
+          await storeAgentX25519Key(agentId, agentX25519Bytes);
+          fingerprint = pairResp.agent_x25519_public_key.substring(0, 8);
+        }
+
         status.style.background = "#0f1a10";
         status.style.border = "1px solid #1b3a20";
         status.style.color = "#3fb950";
-        status.textContent = "Paired successfully via relay!";
+        if (fingerprint) {
+          status.innerHTML = "";
+          status.appendChild(document.createTextNode("Paired successfully via relay! "));
+          const fpSpan = document.createElement("span");
+          fpSpan.style.cssText = "font-family:monospace;background:#161b22;padding:2px 6px;border-radius:3px;border:1px solid #30363d;color:#58a6ff";
+          fpSpan.textContent = "E2E: " + fingerprint;
+          fpSpan.title = "Verify this matches the fingerprint shown in your agent terminal";
+          status.appendChild(fpSpan);
+        } else {
+          status.textContent = "Paired successfully via relay!";
+        }
       } catch (err: unknown) {
         status.style.display = "block";
         status.style.background = "#2d1214";
@@ -424,12 +455,17 @@ export async function renderDashboard(container: HTMLElement) {
         const { publicKeyBytes } = await getOrCreateKeypair();
         const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
 
+        // Get X25519 keypair for E2E encryption
+        const x25519kp = await getOrCreateX25519Keypair();
+        const x25519PubB64 = base64RawUrlEncode(x25519kp.publicKeyBytes);
+
         const res = await fetch(`${endpoint}/api/pair`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             pairing_code: code,
             user_public_key: pubKeyB64,
+            user_x25519_public_key: x25519PubB64,
             username: user.username,
           }),
         });
@@ -441,6 +477,12 @@ export async function renderDashboard(container: HTMLElement) {
           status.style.color = "#f85149";
           status.textContent = `Pairing failed: ${data.error || res.statusText}`;
           return;
+        }
+
+        // Store agent's X25519 key if provided
+        let directFingerprint = "";
+        if (data.agent_x25519_public_key) {
+          directFingerprint = data.agent_x25519_public_key.substring(0, 8);
         }
 
         status.textContent = "Registering agent on server...";
@@ -457,7 +499,17 @@ export async function renderDashboard(container: HTMLElement) {
         status.style.background = "#0f1a10";
         status.style.border = "1px solid #1b3a20";
         status.style.color = "#3fb950";
-        status.textContent = "Paired and registered successfully!";
+        if (directFingerprint) {
+          status.innerHTML = "";
+          status.appendChild(document.createTextNode("Paired and registered! "));
+          const fpSpan = document.createElement("span");
+          fpSpan.style.cssText = "font-family:monospace;background:#161b22;padding:2px 6px;border-radius:3px;border:1px solid #30363d;color:#58a6ff";
+          fpSpan.textContent = "E2E: " + directFingerprint;
+          fpSpan.title = "Verify this matches the fingerprint shown in your agent terminal";
+          status.appendChild(fpSpan);
+        } else {
+          status.textContent = "Paired and registered successfully!";
+        }
       } catch (err: unknown) {
         status.style.display = "block";
         status.style.background = "#2d1214";

@@ -15,8 +15,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.agent
-    ports:
-      - "${AGENT_PORT:-9443}:${AGENT_PORT:-9443}"
     volumes:
       - agent-data:/data
     env_file:

@@ -23,19 +23,23 @@ type WireMessage struct {
 
 // Request is the relay request payload (server → agent).
 type Request struct {
-	ID      string            `json:"id"`
-	Method  string            `json:"method"`
-	Path    string            `json:"path"`
-	Headers map[string]string `json:"headers"`
-	Body    *string           `json:"body"`
+	ID        string            `json:"id"`
+	Method    string            `json:"method,omitempty"`
+	Path      string            `json:"path,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Body      *string           `json:"body,omitempty"`
+	Encrypted bool              `json:"encrypted,omitempty"`
+	Payload   string            `json:"payload,omitempty"`
 }
 
 // Response is the relay response payload (agent → server).
 type Response struct {
-	ID      string            `json:"id"`
-	Status  int               `json:"status"`
-	Headers map[string]string `json:"headers"`
-	Body    *string           `json:"body"`
+	ID        string            `json:"id"`
+	Status    int               `json:"status,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Body      *string           `json:"body,omitempty"`
+	Encrypted bool              `json:"encrypted,omitempty"`
+	Payload   string            `json:"payload,omitempty"`
 }
 
 // Client manages the WebSocket connection to the yourbro server.

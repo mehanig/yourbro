@@ -149,7 +149,8 @@ func main() {
 	r.Use(chimw.RealIP)
 	frontendURL := getEnv("FRONTEND_URL", "http://localhost:5173")
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{frontendURL},
+		// "null" origin comes from sandboxed iframes (sandbox="allow-scripts" without allow-same-origin)
+		AllowedOrigins:   []string{frontendURL, "null"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type"},
 		AllowCredentials: true,
