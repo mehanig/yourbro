@@ -139,6 +139,7 @@ export function deleteAgent(id: number): Promise<void> {
   return request(`/api/agents/${id}`, { method: "DELETE" });
 }
 
+
 export async function logout(): Promise<void> {
   await request("/api/logout", { method: "POST" });
   setLoggedIn(false);

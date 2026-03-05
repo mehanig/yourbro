@@ -24,6 +24,9 @@ import {
 /** Active SSE connection — closed before re-render to prevent leaks. */
 let activeSSE: EventSource | null = null;
 
+/** Cache: agentId → paired status. Reset on full re-render. */
+const pairingCache = new Map<number, "checking" | "paired" | "unpaired">();
+
 /** Escape HTML entities to prevent XSS when interpolating user-controlled data. */
 function esc(s: string): string {
   return s
@@ -34,55 +37,124 @@ function esc(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function renderAgentsList(agents: Agent[], container: HTMLElement) {
-  const listEl = container.querySelector("#agents-list");
-  if (!listEl) return;
+/** Create an RFC 9421 signature for a relay request. */
+async function signRelayRequest(method: string, path: string): Promise<{ sigInput: string; sig: string }> {
+  const { privateKey, publicKeyBytes } = await getOrCreateKeypair();
+  const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
+  const created = Math.floor(Date.now() / 1000);
+  const nonce = crypto.randomUUID();
+  const targetUri = `https://relay.internal${path}`;
+  const sigParams = `("@method" "@target-uri");created=${created};nonce="${nonce}";keyid="${pubKeyB64}"`;
+  const signatureBase = `"@method": ${method}\n"@target-uri": ${targetUri}\n"@signature-params": ${sigParams}`;
+  const sigBytes = await crypto.subtle.sign("Ed25519", privateKey, new TextEncoder().encode(signatureBase));
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sigBytes)));
+  return {
+    sigInput: `sig1=${sigParams}`,
+    sig: `sig1=:${sigB64}:`,
+  };
+}
 
-  // Update relay agent dropdown for pairing
-  const relaySelect = container.querySelector("#pair-relay-agent") as HTMLSelectElement | null;
-  if (relaySelect) {
-    const onlineAgents = agents.filter(a => a.is_online);
-    relaySelect.innerHTML = onlineAgents.length === 0
-      ? '<option value="">No agents online</option>'
-      : onlineAgents.map(a => `<option value="${a.id}">${esc(a.name || "unnamed")} (#${a.id})</option>`).join("");
+/** Probe an agent via relay to check if this browser's Ed25519 key is authorized. */
+async function probeAgentPairing(agentId: number): Promise<boolean> {
+  try {
+    const { sigInput, sig } = await signRelayRequest("GET", "/api/auth-check");
+    const res = await fetch(`${API_BASE}/api/relay/${agentId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        id: crypto.randomUUID(),
+        method: "GET",
+        path: "/api/auth-check",
+        headers: {
+          "Signature-Input": sigInput,
+          "Signature": sig,
+        },
+      }),
+    });
+    if (!res.ok) return false;
+    const envelope = await res.json();
+    return envelope.status === 200;
+  } catch {
+    return false;
+  }
+}
+
+function renderAgentsSplit(agents: Agent[], container: HTMLElement) {
+  const pairedEl = container.querySelector("#paired-agents-list") as HTMLElement;
+  const availableEl = container.querySelector("#available-agents-list") as HTMLElement;
+  if (!pairedEl || !availableEl) return;
+
+  const paired: Agent[] = [];
+  const available: Agent[] = [];
+  const checking: Agent[] = [];
+
+  for (const a of agents) {
+    const status = pairingCache.get(a.id);
+    if (status === "paired") paired.push(a);
+    else if (status === "unpaired") available.push(a);
+    else if (a.is_online) checking.push(a);
+    else paired.push(a); // offline agents with unknown status — show in paired (they were registered)
   }
 
-  listEl.innerHTML =
-    agents.length === 0
-      ? '<p style="color:#656d76;">No agents paired yet.</p>'
-      : agents
-          .map(
-            (a) => `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
-            <div style="display:flex;align-items:center;gap:0.75rem;">
-              <span style="color:${a.is_online ? "#3fb950" : "#656d76"};font-size:1.2rem;">${a.is_online ? "●" : "○"}</span>
-              <div>
-                <span style="font-weight:600;">${esc(a.name || "unnamed")}</span>
-              </div>
-            </div>
-            <button class="delete-agent" data-id="${a.id}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Remove</button>
+  // Render paired agents
+  if (paired.length === 0 && checking.length === 0) {
+    pairedEl.innerHTML = '<p style="color:#656d76;">No paired agents yet.</p>';
+  } else {
+    pairedEl.innerHTML = [...paired, ...checking].map(a => {
+      const isChecking = checking.includes(a);
+      const statusDot = a.is_online
+        ? `<span style="color:#3fb950;font-size:1.2rem;">●</span>`
+        : `<span style="color:#656d76;font-size:1.2rem;">○</span>`;
+      const checkingLabel = isChecking
+        ? `<span style="color:#656d76;font-size:0.8rem;margin-left:0.5rem;">checking...</span>`
+        : "";
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
+          <div style="display:flex;align-items:center;gap:0.75rem;">
+            ${statusDot}
+            <span style="font-weight:600;">${esc(a.name || "unnamed")}</span>
+            ${checkingLabel}
           </div>
-        `
-          )
-          .join("");
+          ${!isChecking ? `<button class="delete-agent" data-id="${a.id}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Remove</button>` : ""}
+        </div>`;
+    }).join("");
+  }
 
-  // Re-bind delete handlers
-  listEl.querySelectorAll(".delete-agent").forEach((btn) => {
+  // Render available (unpaired) agents
+  if (available.length === 0) {
+    availableEl.innerHTML = '<p style="color:#656d76;">No unpaired agents online.</p>';
+  } else {
+    availableEl.innerHTML = available.map(a => `
+      <div style="padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+          <div style="display:flex;align-items:center;gap:0.75rem;">
+            <span style="color:#e3b341;font-size:1.2rem;">●</span>
+            <span style="font-weight:600;">${esc(a.name || "unnamed")}</span>
+            <span style="color:#e3b341;font-size:0.8rem;">needs pairing</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+          <input class="pair-code-input" data-agent-id="${a.id}" type="text" placeholder="Pairing code" style="width:140px;padding:0.4rem;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;font-family:monospace;font-size:0.85rem;" />
+          <button class="pair-agent-btn" data-agent-id="${a.id}" style="padding:0.4rem 0.8rem;background:#1a2e1d;border:1px solid #2a5a30;color:#3fb950;border-radius:6px;cursor:pointer;font-size:0.85rem;">Pair</button>
+        </div>
+        <div class="pair-agent-status" data-agent-id="${a.id}" style="margin-top:0.5rem;display:none;padding:0.5rem;border-radius:6px;font-size:0.85rem;"></div>
+      </div>
+    `).join("");
+  }
+
+  // Bind remove handlers for paired agents
+  bindRemoveHandlers(container);
+}
+
+function bindRemoveHandlers(container: HTMLElement) {
+  container.querySelectorAll(".delete-agent").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = Number((btn as HTMLElement).dataset.id);
       if (!confirm("Remove this agent?")) return;
 
-      // Revoke key on agent via relay
       try {
-        const { publicKeyBytes } = await getOrCreateKeypair();
-        const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
-        const created = Math.floor(Date.now() / 1000);
-        const nonce = crypto.randomUUID();
-        const sigParams = `("@method" "@target-uri");created=${created};nonce="${nonce}";keyid="${pubKeyB64}"`;
-        const signatureBase = `"@method": DELETE\n"@target-uri": https://relay.internal/api/keys\n"@signature-params": ${sigParams}`;
-        const sig = await crypto.subtle.sign("Ed25519", (await getOrCreateKeypair()).privateKey, new TextEncoder().encode(signatureBase));
-        const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
-
+        const { sigInput, sig } = await signRelayRequest("DELETE", "/api/keys");
         const res = await fetch(`${API_BASE}/api/relay/${id}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -92,8 +164,8 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
             method: "DELETE",
             path: "/api/keys",
             headers: {
-              "Signature-Input": `sig1=${sigParams}`,
-              "Signature": `sig1=:${sigB64}:`,
+              "Signature-Input": sigInput,
+              "Signature": sig,
             },
           }),
         });
@@ -107,21 +179,25 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
         return;
       }
 
-      // Agent confirmed revocation — now safe to remove from server
       await deleteAgent(id);
+      pairingCache.delete(id);
       renderDashboard(container);
     });
   });
 }
 
-/** Fetch and render pages from the first online agent via relay. */
+/** Fetch and render pages from the first paired online agent via relay. */
 async function renderPagesList(agents: Agent[], username: string, container: HTMLElement) {
   const pagesEl = container.querySelector("#pages-list");
   if (!pagesEl) return;
 
-  const onlineAgent = agents.find(a => a.is_online);
+  // Find first online paired agent
+  const onlineAgent = agents.find(a => a.is_online && pairingCache.get(a.id) === "paired");
   if (!onlineAgent) {
-    pagesEl.innerHTML = '<p style="color:#656d76;">Agent offline — connect your agent to manage pages.</p>';
+    const anyOnline = agents.some(a => a.is_online);
+    pagesEl.innerHTML = anyOnline
+      ? '<p style="color:#656d76;">Pair an agent to view pages.</p>'
+      : '<p style="color:#656d76;">Agent offline — connect your agent to manage pages.</p>';
     return;
   }
 
@@ -144,7 +220,7 @@ async function renderPagesList(agents: Agent[], username: string, container: HTM
     </div>
   `).join("");
 
-  // Bind delete handlers — delete via relay with RFC 9421 signature
+  // Bind delete handlers
   pagesEl.querySelectorAll(".delete-page").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const slug = (btn as HTMLElement).dataset.slug!;
@@ -152,11 +228,11 @@ async function renderPagesList(agents: Agent[], username: string, container: HTM
       if (!confirm(`Delete page "${slug}"?`)) return;
 
       try {
+        const targetUri = `https://relay.internal/api/page/${encodeURIComponent(slug)}`;
         const { privateKey, publicKeyBytes } = await getOrCreateKeypair();
         const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
         const created = Math.floor(Date.now() / 1000);
         const nonce = crypto.randomUUID();
-        const targetUri = `https://relay.internal/api/page/${encodeURIComponent(slug)}`;
         const sigParams = `("@method" "@target-uri");created=${created};nonce="${nonce}";keyid="${pubKeyB64}"`;
         const signatureBase = `"@method": DELETE\n"@target-uri": ${targetUri}\n"@signature-params": ${sigParams}`;
         const sig = await crypto.subtle.sign("Ed25519", privateKey, new TextEncoder().encode(signatureBase));
@@ -181,7 +257,6 @@ async function renderPagesList(agents: Agent[], username: string, container: HTM
           alert(`Delete failed: ${data.error || res.statusText}`);
           return;
         }
-        // Refresh pages list
         renderPagesList(agents, username, container);
       } catch (err) {
         alert(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -190,12 +265,94 @@ async function renderPagesList(agents: Agent[], username: string, container: HTM
   });
 }
 
+/** Bind pairing button handlers for available (unpaired) agents. */
+function bindPairHandlers(agents: Agent[], user: User, container: HTMLElement) {
+  container.querySelectorAll(".pair-agent-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const agentId = (btn as HTMLElement).dataset.agentId!;
+      const input = container.querySelector(`.pair-code-input[data-agent-id="${agentId}"]`) as HTMLInputElement;
+      const statusEl = container.querySelector(`.pair-agent-status[data-agent-id="${agentId}"]`) as HTMLElement;
+      const code = input?.value.trim();
+
+      if (!code) {
+        statusEl.style.display = "block";
+        statusEl.style.background = "#2d1214";
+        statusEl.style.border = "1px solid #5a1d22";
+        statusEl.style.color = "#f85149";
+        statusEl.textContent = "Pairing code is required.";
+        return;
+      }
+
+      statusEl.style.display = "block";
+      statusEl.style.background = "#161b22";
+      statusEl.style.border = "1px solid #30363d";
+      statusEl.style.color = "#8b949e";
+      statusEl.textContent = "Pairing via relay...";
+
+      try {
+        const { publicKeyBytes } = await getOrCreateKeypair();
+        const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
+
+        const x25519kp = await getOrCreateX25519Keypair();
+        const x25519PubB64 = base64RawUrlEncode(x25519kp.publicKeyBytes);
+
+        const res = await fetch(`${API_BASE}/api/relay/${agentId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            id: crypto.randomUUID(),
+            method: "POST",
+            path: "/api/pair",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              pairing_code: code,
+              user_public_key: pubKeyB64,
+              user_x25519_public_key: x25519PubB64,
+              username: user.username,
+            }),
+          }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: res.statusText }));
+          statusEl.style.background = "#2d1214";
+          statusEl.style.border = "1px solid #5a1d22";
+          statusEl.style.color = "#f85149";
+          statusEl.textContent = `Pairing failed: ${data.error || res.statusText}`;
+          return;
+        }
+
+        // Store agent's X25519 key
+        const pairResp = await res.json().catch(() => ({}));
+        if (pairResp.agent_x25519_public_key) {
+          const agentX25519Bytes = base64RawUrlDecode(pairResp.agent_x25519_public_key);
+          await storeAgentX25519Key(agentId, agentX25519Bytes);
+        }
+
+        // Update cache and re-render
+        pairingCache.set(Number(agentId), "paired");
+        renderAgentsSplit(agents, container);
+        bindPairHandlers(agents, user, container);
+        renderPagesList(agents, user.username, container);
+
+      } catch (err: unknown) {
+        statusEl.style.display = "block";
+        statusEl.style.background = "#2d1214";
+        statusEl.style.border = "1px solid #5a1d22";
+        statusEl.style.color = "#f85149";
+        statusEl.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    });
+  });
+}
+
 export async function renderDashboard(container: HTMLElement) {
-  // Close previous SSE connection to prevent leaks on re-render
   if (activeSSE) {
     activeSSE.close();
     activeSSE = null;
   }
+  pairingCache.clear();
 
   container.innerHTML = `<p style="color:#8b949e;">Loading...</p>`;
 
@@ -207,6 +364,13 @@ export async function renderDashboard(container: HTMLElement) {
     window.location.hash = "#/";
     return;
   }
+
+  // Check if browser has any Ed25519 keypair — if not, all agents are unpaired
+  let hasKeypair = false;
+  try {
+    await getOrCreateKeypair();
+    hasKeypair = true;
+  } catch { /* no keypair */ }
 
   const tokens = (await listTokens()) || [];
 
@@ -221,24 +385,21 @@ export async function renderDashboard(container: HTMLElement) {
     </header>
 
     <section style="margin-bottom:2rem;">
-      <h2 style="font-size:1.2rem;margin-bottom:1rem;">Paired Agents</h2>
-      <div id="agents-list">
+      <h2 style="font-size:1.2rem;margin-bottom:1rem;">Your Agents</h2>
+      <div id="paired-agents-list">
         <p style="color:#656d76;">Connecting...</p>
       </div>
-      <p style="color:#656d76;font-size:0.8rem;margin-top:0.5rem;">● online &nbsp; ○ offline &nbsp; <span style="color:#58a6ff;">relay</span> = connected via WebSocket</p>
+      <p style="color:#656d76;font-size:0.8rem;margin-top:0.5rem;">● online &nbsp; ○ offline</p>
     </section>
 
     <section style="margin-bottom:2rem;">
-      <h2 style="font-size:1.2rem;margin-bottom:1rem;">Pair New Agent</h2>
-      <p style="color:#8b949e;margin-bottom:1rem;font-size:0.9rem;">
-        Select an online relay agent and enter its pairing code to pair.
+      <h2 style="font-size:1.2rem;margin-bottom:1rem;">Available Agents</h2>
+      <p style="color:#8b949e;margin-bottom:0.75rem;font-size:0.9rem;">
+        Online agents that need pairing with this browser. Enter the pairing code shown in your agent's terminal.
       </p>
-      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
-        <select id="pair-relay-agent" style="padding:0.5rem;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;min-width:160px;"></select>
-        <input id="pair-code" type="text" placeholder="Pairing code" style="width:140px;padding:0.5rem;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;font-family:monospace;" />
-        <button id="pair-btn" style="padding:0.5rem 1rem;background:#1a2e1d;border:1px solid #2a5a30;color:#3fb950;border-radius:6px;cursor:pointer;">Pair</button>
+      <div id="available-agents-list">
+        <p style="color:#656d76;">Waiting for agents...</p>
       </div>
-      <div id="pair-status" style="margin-top:0.75rem;display:none;padding:0.75rem;border-radius:8px;font-size:0.9rem;"></div>
     </section>
 
     <section style="margin-bottom:2rem;">
@@ -273,35 +434,64 @@ export async function renderDashboard(container: HTMLElement) {
     </section>
   `;
 
-  // SSE for real-time agent status (cookie-based auth via withCredentials)
+  // SSE for real-time agent status
   activeSSE = new EventSource(`${API_BASE}/api/agents/stream`, { withCredentials: true });
   const evtSource = activeSSE;
   let pagesLoaded = false;
+
   evtSource.onmessage = (event) => {
     try {
       const agents: Agent[] = JSON.parse(event.data);
-      renderAgentsList(agents, container);
-      // Fetch pages from first online agent (once, or when first agent comes online)
-      if (!pagesLoaded && agents.some(a => a.is_online)) {
+
+      // Render with current pairing cache
+      renderAgentsSplit(agents, container);
+      bindPairHandlers(agents, user, container);
+
+      // Probe online agents with unknown pairing status
+      if (hasKeypair) {
+        const toProbe = agents.filter(a => a.is_online && !pairingCache.has(a.id));
+        for (const a of toProbe) {
+          pairingCache.set(a.id, "checking");
+          probeAgentPairing(a.id).then((isPaired) => {
+            pairingCache.set(a.id, isPaired ? "paired" : "unpaired");
+            renderAgentsSplit(agents, container);
+            bindPairHandlers(agents, user, container);
+            // Load pages once we find a paired agent
+            if (isPaired && !pagesLoaded) {
+              pagesLoaded = true;
+              renderPagesList(agents, user.username, container);
+            }
+          });
+        }
+      } else {
+        // No keypair — all online agents are unpaired
+        for (const a of agents.filter(a => a.is_online)) {
+          pairingCache.set(a.id, "unpaired");
+        }
+        renderAgentsSplit(agents, container);
+        bindPairHandlers(agents, user, container);
+      }
+
+      // Pages from first paired agent
+      if (!pagesLoaded && agents.some(a => a.is_online && pairingCache.get(a.id) === "paired")) {
         pagesLoaded = true;
         renderPagesList(agents, user.username, container);
       }
     } catch { /* ignore parse errors */ }
   };
+
   evtSource.onerror = () => {
-    // On error, close and fall back to static list
     evtSource.close();
     activeSSE = null;
-    // Load once as fallback
     import("../lib/api").then(({ listAgents }) => {
       listAgents().then((agents: Agent[]) => {
-        renderAgentsList(agents || [], container);
+        renderAgentsSplit(agents || [], container);
+        bindPairHandlers(agents || [], user, container);
         renderPagesList(agents || [], user.username, container);
       });
     });
   };
 
-  // Close SSE when navigating away
   const cleanup = () => {
     evtSource.close();
     activeSSE = null;
@@ -317,8 +507,6 @@ export async function renderDashboard(container: HTMLElement) {
     window.location.hash = "#/";
     window.location.reload();
   });
-
-  // Page delete handlers are bound in renderPagesList()
 
   document.querySelectorAll(".delete-token").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -342,104 +530,4 @@ export async function renderDashboard(container: HTMLElement) {
       display.style.display = "block";
       document.getElementById("new-token-value")!.textContent = resp.token;
     });
-
-  const pairRelaySelect = document.getElementById("pair-relay-agent") as HTMLSelectElement;
-
-  document.getElementById("pair-btn")?.addEventListener("click", async () => {
-    const code = (
-      document.getElementById("pair-code") as HTMLInputElement
-    ).value.trim();
-    const status = document.getElementById("pair-status")!;
-    const agentId = pairRelaySelect.value;
-
-    if (!code) {
-      status.style.display = "block";
-      status.style.background = "#2d1214";
-      status.style.border = "1px solid #5a1d22";
-      status.style.color = "#f85149";
-      status.textContent = "Pairing code is required.";
-      return;
-    }
-
-    if (!agentId) {
-      status.style.display = "block";
-      status.style.background = "#2d1214";
-      status.style.border = "1px solid #5a1d22";
-      status.style.color = "#f85149";
-      status.textContent = "Select an online agent to pair with.";
-      return;
-    }
-
-    status.style.display = "block";
-    status.style.background = "#161b22";
-    status.style.border = "1px solid #30363d";
-    status.style.color = "#8b949e";
-    status.textContent = "Pairing via relay...";
-
-    try {
-      const { publicKeyBytes } = await getOrCreateKeypair();
-      const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
-
-      // Get X25519 keypair for E2E encryption
-      const x25519kp = await getOrCreateX25519Keypair();
-      const x25519PubB64 = base64RawUrlEncode(x25519kp.publicKeyBytes);
-
-      const res = await fetch(`${API_BASE}/api/relay/${agentId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          id: crypto.randomUUID(),
-          method: "POST",
-          path: "/api/pair",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            pairing_code: code,
-            user_public_key: pubKeyB64,
-            user_x25519_public_key: x25519PubB64,
-            username: user.username,
-          }),
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: res.statusText }));
-        status.style.background = "#2d1214";
-        status.style.border = "1px solid #5a1d22";
-        status.style.color = "#f85149";
-        status.textContent = `Pairing failed: ${data.error || res.statusText}`;
-        return;
-      }
-
-      // Store agent's X25519 public key for E2E encryption
-      const pairResp = await res.json().catch(() => ({}));
-      let fingerprint = "";
-      if (pairResp.agent_x25519_public_key) {
-        const agentX25519Bytes = base64RawUrlDecode(pairResp.agent_x25519_public_key);
-        await storeAgentX25519Key(agentId, agentX25519Bytes);
-        fingerprint = pairResp.agent_x25519_public_key.substring(0, 8);
-      }
-
-      status.style.background = "#0f1a10";
-      status.style.border = "1px solid #1b3a20";
-      status.style.color = "#3fb950";
-      if (fingerprint) {
-        status.innerHTML = "";
-        status.appendChild(document.createTextNode("Paired successfully! "));
-        const fpSpan = document.createElement("span");
-        fpSpan.style.cssText = "font-family:monospace;background:#161b22;padding:2px 6px;border-radius:3px;border:1px solid #30363d;color:#58a6ff";
-        fpSpan.textContent = "E2E: " + fingerprint;
-        fpSpan.title = "Verify this matches the fingerprint shown in your agent terminal";
-        status.appendChild(fpSpan);
-      } else {
-        status.textContent = "Paired successfully!";
-      }
-    } catch (err: unknown) {
-      status.style.display = "block";
-      status.style.background = "#2d1214";
-      status.style.border = "1px solid #5a1d22";
-      status.style.color = "#f85149";
-      status.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
-    }
-  });
 }

@@ -1,0 +1,15 @@
+services:
+  agent-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    volumes:
+      - agent-prod-data:/data
+    environment:
+      SQLITE_PATH: /data/agent.db
+    env_file:
+      - ./agent-prod.env
+    restart: unless-stopped
+
+volumes:
+  agent-prod-data:

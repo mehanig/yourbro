@@ -60,6 +60,16 @@ func main() {
 	// Pairing endpoint (no auth — pairing code IS the auth)
 	r.Post("/api/pair", pairHandler.Pair)
 
+	// Auth check — browser probes this to detect pairing status
+	r.Route("/api/auth-check", func(r chi.Router) {
+		r.Use(mw.VerifyUserSignature(db))
+		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+			username := mw.GetUsername(r)
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"status":"paired","username":"` + username + `"}`))
+		})
+	})
+
 	// Key revocation (require user signature — RFC 9421)
 	r.Route("/api/keys", func(r chi.Router) {
 		r.Use(mw.VerifyUserSignature(db))
