@@ -16,15 +16,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/mehanig/yourbro/agent/internal/e2e"
 	"github.com/mehanig/yourbro/agent/internal/handlers"
 	mw "github.com/mehanig/yourbro/agent/internal/middleware"
+	"github.com/mehanig/yourbro/agent/internal/relay"
 	"github.com/mehanig/yourbro/agent/internal/storage"
-	"golang.org/x/crypto/acme/autocert"
 )
 
 func main() {
-	domain := os.Getenv("AGENT_DOMAIN")
-	port := getEnv("AGENT_PORT", "8443")
 	sqlitePath := getEnv("SQLITE_PATH", "/data/agent.db")
 
 	db, err := storage.NewDB(sqlitePath)
@@ -75,74 +74,45 @@ func main() {
 		r.Delete("/{key}", storageHandler.Delete)
 	})
 
-	// Start heartbeat if API token and server URL are configured
-	apiToken := os.Getenv("YB_API_TOKEN")
-	serverURL := os.Getenv("YB_SERVER_URL")
-	agentEndpoint := os.Getenv("YB_AGENT_ENDPOINT") // how the server knows this agent
-	if apiToken != "" && serverURL != "" && agentEndpoint != "" {
-		startHeartbeat(serverURL, apiToken, agentEndpoint)
-		log.Printf("Heartbeat started → %s (every 60s)", serverURL)
-	} else if apiToken != "" || serverURL != "" {
-		log.Printf("WARNING: Set YB_API_TOKEN, YB_SERVER_URL, and YB_AGENT_ENDPOINT to enable heartbeat")
+	// Relay mode — connect to server via WebSocket
+	apiToken := os.Getenv("YOURBRO_TOKEN")
+	serverURL := os.Getenv("YOURBRO_SERVER_URL")
+	agentName := getEnv("YOURBRO_AGENT_NAME", "relay-agent")
+
+	if apiToken == "" || serverURL == "" {
+		log.Fatalf("YOURBRO_TOKEN and YOURBRO_SERVER_URL are required")
 	}
 
-	if domain != "" {
-		// Production: autocert TLS
-		m := &autocert.Manager{
-			Cache:      autocert.DirCache("/data/certs"),
-			Prompt:     autocert.AcceptTOS,
-			HostPolicy: autocert.HostWhitelist(domain),
-		}
+	serverURL = strings.TrimRight(serverURL, "/")
+	log.Printf("Connecting to %s via WebSocket", serverURL)
 
-		go func() {
-			log.Println("Starting ACME HTTP challenge server on :80")
-			if err := http.ListenAndServe(":80", m.HTTPHandler(nil)); err != nil {
-				log.Fatalf("ACME HTTP server error: %v", err)
-			}
-		}()
-
-		srv := &http.Server{
-			Addr:      ":" + port,
-			Handler:   r,
-			TLSConfig: m.TLSConfig(),
-		}
-
-		go func() {
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-			<-sigCh
-			log.Println("Shutting down...")
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			srv.Shutdown(ctx)
-		}()
-
-		log.Printf("Agent server starting on :%s (TLS, domain=%s)", port, domain)
-		if err := srv.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
-		}
+	// Initialize E2E encryption if agent has an identity
+	var cipherCache *e2e.CipherCache
+	if identity, err := db.GetOrCreateIdentity(); err != nil {
+		log.Printf("WARNING: E2E encryption disabled: %v", err)
 	} else {
-		// Development: plain HTTP
-		srv := &http.Server{
-			Addr:    ":" + port,
-			Handler: r,
-		}
-
-		go func() {
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-			<-sigCh
-			log.Println("Shutting down...")
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			srv.Shutdown(ctx)
-		}()
-
-		log.Printf("Agent server starting on :%s (no TLS, dev mode)", port)
-		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-			log.Fatalf("Server error: %v", err)
-		}
+		cipherCache = e2e.NewCipherCache(identity.X25519PrivateKey)
+		log.Printf("E2E encryption enabled (X25519 pub: %x...)", identity.X25519PublicKey.Bytes()[:8])
 	}
+
+	router := &relay.Router{Mux: r, CipherCache: cipherCache, DB: db}
+	client := &relay.Client{
+		ServerURL: serverURL,
+		APIToken:  apiToken,
+		AgentName: agentName,
+		Handler:   router.HandleRequest,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		log.Println("Shutting down...")
+		cancel()
+	}()
+
+	client.Run(ctx)
 }
 
 func getEnv(key, fallback string) string {
@@ -150,33 +120,6 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-func startHeartbeat(serverURL, apiToken, endpoint string) {
-	serverURL = strings.TrimRight(serverURL, "/")
-	send := func() {
-		body := strings.NewReader(fmt.Sprintf(`{"endpoint":%q}`, endpoint))
-		req, err := http.NewRequest("POST", serverURL+"/api/agents/heartbeat", body)
-		if err != nil {
-			return
-		}
-		req.Header.Set("Authorization", "Bearer "+apiToken)
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			log.Printf("Heartbeat failed: %v", err)
-			return
-		}
-		resp.Body.Close()
-	}
-	send() // immediate first heartbeat
-	go func() {
-		ticker := time.NewTicker(60 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			send()
-		}
-	}()
 }
 
 const pairingChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"

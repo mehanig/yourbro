@@ -7,6 +7,8 @@
 
 const DB_NAME = "clawd-keys";
 const STORE_NAME = "keypair";
+const X25519_STORE = "x25519";
+const AGENT_KEYS_STORE = "agent-keys";
 const KEY_ID = "default";
 
 export interface StoredKeypair {
@@ -14,43 +16,28 @@ export interface StoredKeypair {
   publicKeyBytes: Uint8Array;
 }
 
+export interface StoredX25519Keypair {
+  privateKey: CryptoKey;
+  publicKeyBytes: Uint8Array;
+}
+
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, 2);
     req.onupgradeneeded = () => {
-      req.result.createObjectStore(STORE_NAME);
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+      if (!db.objectStoreNames.contains(X25519_STORE)) {
+        db.createObjectStore(X25519_STORE);
+      }
+      if (!db.objectStoreNames.contains(AGENT_KEYS_STORE)) {
+        db.createObjectStore(AGENT_KEYS_STORE);
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
-  });
-}
-
-async function loadFromIndexedDB(): Promise<StoredKeypair | null> {
-  try {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readonly");
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.get(KEY_ID);
-      req.onsuccess = () => resolve(req.result as StoredKeypair | null);
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function saveToIndexedDB(
-  privateKey: CryptoKey,
-  publicKeyBytes: Uint8Array
-): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    store.put({ privateKey, publicKeyBytes }, KEY_ID);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
   });
 }
 
@@ -59,11 +46,25 @@ async function saveToIndexedDB(
  * WebCrypto `extractable` flag applies to BOTH keys in the pair, so we
  * generate extractable, export the public key, then re-import the private
  * key as non-extractable.
+ *
+ * Uses a single readwrite transaction to check-then-create atomically,
+ * preventing a TOCTOU race across browser tabs where two tabs could both
+ * read "no keypair" and generate different keypairs.
  */
 export async function getOrCreateKeypair(): Promise<StoredKeypair> {
-  const cached = await loadFromIndexedDB();
-  if (cached) return cached;
+  const db = await openDB();
 
+  // Attempt atomic read inside a readwrite transaction to hold the lock
+  const existing = await new Promise<StoredKeypair | null>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.get(KEY_ID);
+    req.onsuccess = () => resolve(req.result as StoredKeypair | null);
+    req.onerror = () => reject(req.error);
+  });
+  if (existing) return existing;
+
+  // No keypair exists — generate one
   const temp = (await crypto.subtle.generateKey("Ed25519", true, [
     "sign",
     "verify",
@@ -83,8 +84,103 @@ export async function getOrCreateKeypair(): Promise<StoredKeypair> {
 
   new Uint8Array(privPkcs8).fill(0);
 
-  await saveToIndexedDB(privateKey, publicKeyBytes);
-  return { privateKey, publicKeyBytes };
+  // Re-check and save in a single readwrite transaction (double-check pattern)
+  return new Promise<StoredKeypair>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const checkReq = store.get(KEY_ID);
+    checkReq.onsuccess = () => {
+      if (checkReq.result) {
+        // Another tab won the race — use their keypair
+        resolve(checkReq.result as StoredKeypair);
+        return;
+      }
+      // We won — store ours
+      store.put({ privateKey, publicKeyBytes }, KEY_ID);
+    };
+    checkReq.onerror = () => reject(checkReq.error);
+    tx.oncomplete = () => resolve({ privateKey, publicKeyBytes });
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/**
+ * Get or create an X25519 keypair for E2E encryption.
+ * Separate from Ed25519 (signing ≠ encryption).
+ */
+export async function getOrCreateX25519Keypair(): Promise<StoredX25519Keypair> {
+  const db = await openDB();
+
+  const existing = await new Promise<StoredX25519Keypair | null>((resolve, reject) => {
+    const tx = db.transaction(X25519_STORE, "readwrite");
+    const store = tx.objectStore(X25519_STORE);
+    const req = store.get(KEY_ID);
+    req.onsuccess = () => resolve(req.result as StoredX25519Keypair | null);
+    req.onerror = () => reject(req.error);
+  });
+  if (existing) return existing;
+
+  // Generate X25519 keypair — extractable so we can export the public key
+  const kp = (await crypto.subtle.generateKey(
+    "X25519", true, ["deriveBits"]
+  )) as CryptoKeyPair;
+
+  const pubRaw = await crypto.subtle.exportKey("raw", kp.publicKey);
+  const publicKeyBytes = new Uint8Array(pubRaw);
+
+  // Re-import private key as non-extractable
+  const privPkcs8 = await crypto.subtle.exportKey("pkcs8", kp.privateKey);
+  const privateKey = await crypto.subtle.importKey(
+    "pkcs8", privPkcs8, "X25519", false, ["deriveBits"]
+  );
+  new Uint8Array(privPkcs8).fill(0);
+
+  return new Promise<StoredX25519Keypair>((resolve, reject) => {
+    const tx = db.transaction(X25519_STORE, "readwrite");
+    const store = tx.objectStore(X25519_STORE);
+    const checkReq = store.get(KEY_ID);
+    checkReq.onsuccess = () => {
+      if (checkReq.result) {
+        resolve(checkReq.result as StoredX25519Keypair);
+        return;
+      }
+      store.put({ privateKey, publicKeyBytes }, KEY_ID);
+    };
+    checkReq.onerror = () => reject(checkReq.error);
+    tx.oncomplete = () => resolve({ privateKey, publicKeyBytes });
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/** Store an agent's X25519 public key (received during pairing). */
+export async function storeAgentX25519Key(agentId: string, pubKeyBytes: Uint8Array): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(AGENT_KEYS_STORE, "readwrite");
+    tx.objectStore(AGENT_KEYS_STORE).put(pubKeyBytes, `x25519-${agentId}`);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/** Load an agent's X25519 public key from IndexedDB. */
+export async function loadAgentX25519Key(agentId: string): Promise<Uint8Array | null> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(AGENT_KEYS_STORE, "readonly");
+    const req = tx.objectStore(AGENT_KEYS_STORE).get(`x25519-${agentId}`);
+    req.onsuccess = () => resolve(req.result as Uint8Array | null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/** Base64url-decode without padding. */
+export function base64RawUrlDecode(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+  const binStr = atob(b64);
+  const bytes = new Uint8Array(binStr.length);
+  for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+  return bytes;
 }
 
 /** Base64url-encode without padding (RFC 4648 §5). */
@@ -101,56 +197,3 @@ export function base64StdEncode(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes));
 }
 
-/**
- * Send an RFC 9421 signed HTTP request to an agent endpoint.
- * Uses the browser's Ed25519 keypair from IndexedDB.
- */
-export async function signedFetch(
-  method: string,
-  url: string,
-  body?: string
-): Promise<Response> {
-  const { privateKey, publicKeyBytes } = await getOrCreateKeypair();
-  const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
-  const created = Math.floor(Date.now() / 1000);
-  const nonce = crypto.randomUUID();
-
-  // Content-Digest for body (RFC 9530)
-  let contentDigest = "";
-  if (body) {
-    const hash = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(body)
-    );
-    contentDigest = `sha-256=:${base64StdEncode(new Uint8Array(hash))}:`;
-  }
-
-  // RFC 9421 signature base
-  const coveredComponents = body
-    ? '("@method" "@target-uri" "content-digest")'
-    : '("@method" "@target-uri")';
-  const sigParams = `${coveredComponents};created=${created};nonce="${nonce}";keyid="${pubKeyB64}"`;
-
-  const lines: string[] = [
-    `"@method": ${method}`,
-    `"@target-uri": ${url}`,
-  ];
-  if (contentDigest) lines.push(`"content-digest": ${contentDigest}`);
-  lines.push(`"@signature-params": ${sigParams}`);
-  const signatureBase = lines.join("\n");
-
-  const sig = await crypto.subtle.sign(
-    "Ed25519",
-    privateKey,
-    new TextEncoder().encode(signatureBase)
-  );
-  const sigB64 = base64StdEncode(new Uint8Array(sig));
-
-  const headers: Record<string, string> = {
-    "Signature-Input": `sig1=${sigParams}`,
-    Signature: `sig1=:${sigB64}:`,
-  };
-  if (contentDigest) headers["Content-Digest"] = contentDigest;
-
-  return fetch(url, { method, headers, body });
-}

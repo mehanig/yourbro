@@ -26,6 +26,7 @@ import (
 	"github.com/mehanig/yourbro/api/internal/handlers"
 	"github.com/mehanig/yourbro/api/internal/middleware"
 	"github.com/mehanig/yourbro/api/internal/models"
+	"github.com/mehanig/yourbro/api/internal/relay"
 	"github.com/mehanig/yourbro/api/internal/storage"
 )
 
@@ -130,13 +131,15 @@ func main() {
 	oauthCfg := auth.NewGoogleOAuthConfig()
 	pagesHandler := &handlers.PagesHandler{
 		DB:        db,
-		AllowHTTP: os.Getenv("ALLOW_HTTP_AGENT") == "true",
 		SDKScript: sdkScript,
 	}
 	keysHandler := &handlers.KeysHandler{DB: db}
 	sseBroker := handlers.NewSSEBroker(db)
 	sseBroker.StartStaleChecker(context.Background())
-	agentsHandler := &handlers.AgentsHandler{DB: db, Broker: sseBroker}
+	relayHub := relay.NewHub(db, sseBroker.NotifyUser)
+	sseBroker.Hub = relayHub
+	agentsHandler := &handlers.AgentsHandler{DB: db, Broker: sseBroker, Hub: relayHub}
+	relayHandler := &handlers.RelayHandler{Hub: relayHub}
 
 	r := chi.NewRouter()
 
@@ -146,7 +149,8 @@ func main() {
 	r.Use(chimw.RealIP)
 	frontendURL := getEnv("FRONTEND_URL", "http://localhost:5173")
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{frontendURL},
+		// "null" origin comes from sandboxed iframes (sandbox="allow-scripts" without allow-same-origin)
+		AllowedOrigins:   []string{frontendURL, "null"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type"},
 		AllowCredentials: true,
@@ -211,7 +215,7 @@ func main() {
 			Value:    token,
 			Path:     "/",
 			HttpOnly: true,
-			Secure:   os.Getenv("AGENT_DOMAIN") != "", // true in production (HTTPS)
+			Secure:   os.Getenv("ENVIRONMENT") == "production",
 			SameSite: http.SameSiteLaxMode,
 			MaxAge:   7 * 24 * 60 * 60, // 7 days, matches JWT expiry
 		})
@@ -234,6 +238,38 @@ func main() {
 		})
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	// WebSocket endpoint for relay-mode agents (agent auth via Bearer token)
+	r.Get("/ws/agent", func(w http.ResponseWriter, r *http.Request) {
+		// Authenticate agent via Bearer token
+		header := r.Header.Get("Authorization")
+		if header == "" {
+			http.Error(w, "missing authorization", http.StatusUnauthorized)
+			return
+		}
+		parts := strings.SplitN(header, " ", 2)
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			http.Error(w, "invalid authorization format", http.StatusUnauthorized)
+			return
+		}
+		tokenStr := parts[1]
+
+		// Validate API token
+		hash := auth.HashToken(tokenStr)
+		token, err := db.GetTokenByHash(r.Context(), hash)
+		if err != nil {
+			http.Error(w, "invalid or expired token", http.StatusUnauthorized)
+			return
+		}
+
+		// Get agent name from query param
+		agentName := r.URL.Query().Get("name")
+		if agentName == "" {
+			agentName = "relay-agent"
+		}
+
+		relayHub.HandleAgentWS(w, r, token.UserID, agentName)
 	})
 
 	// Authenticated API routes
@@ -333,9 +369,11 @@ func main() {
 			r.Post("/", agentsHandler.Register)
 			r.Get("/", agentsHandler.List)
 			r.Delete("/{id}", agentsHandler.Delete)
-			r.Post("/heartbeat", agentsHandler.Heartbeat)
-			r.Get("/stream", sseBroker.ServeHTTP)
+		r.Get("/stream", sseBroker.ServeHTTP)
 		})
+
+		// Relay — forward requests to relay-mode agents via WebSocket
+		r.Post("/relay/{agent_id}", relayHandler.Relay)
 
 		// Public Keys
 		r.Route("/keys", func(r chi.Router) {

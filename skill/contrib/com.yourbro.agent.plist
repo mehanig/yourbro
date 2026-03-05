@@ -12,17 +12,11 @@
 
     <key>EnvironmentVariables</key>
     <dict>
-        <key>AGENT_PORT</key>
-        <string>9443</string>
-        <!-- Uncomment and set these for production use:
-        <key>AGENT_DOMAIN</key>
-        <string>agent.example.com</string>
+        <!-- Set these for production use:
         <key>YOURBRO_TOKEN</key>
         <string>yb_your_token</string>
-        <key>YB_SERVER_URL</key>
+        <key>YOURBRO_SERVER_URL</key>
         <string>https://yourbro.ai</string>
-        <key>YB_AGENT_ENDPOINT</key>
-        <string>https://agent.example.com:9443</string>
         -->
     </dict>
 

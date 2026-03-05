@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"crypto/ecdh"
+	"crypto/rand"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -9,6 +11,12 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
+// Identity holds the agent's X25519 keypair for E2E encryption.
+type Identity struct {
+	X25519PrivateKey *ecdh.PrivateKey
+	X25519PublicKey  *ecdh.PublicKey
+}
 
 type DB struct {
 	db *sql.DB
@@ -36,12 +44,21 @@ func NewDB(path string) (*DB, error) {
 		CREATE TABLE IF NOT EXISTS authorized_keys (
 			public_key TEXT NOT NULL PRIMARY KEY,
 			username TEXT NOT NULL,
+			x25519_public_key BLOB,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		CREATE TABLE IF NOT EXISTS agent_identity (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			x25519_private_key BLOB NOT NULL,
+			x25519_public_key BLOB NOT NULL
 		);
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
+
+	// Migrations: add columns that may not exist in older databases
+	db.Exec(`ALTER TABLE authorized_keys ADD COLUMN x25519_public_key BLOB`) // ignore error if already exists
 
 	d := &DB{db: db, authKeys: make(map[string]string)}
 	if err := d.reloadAuthKeys(); err != nil {
@@ -168,4 +185,93 @@ func (d *DB) List(slug, prefix string) ([]Entry, error) {
 		entries = append(entries, e)
 	}
 	return entries, nil
+}
+
+// --- Agent Identity (X25519) ---
+
+// GetOrCreateIdentity returns the agent's X25519 keypair, generating one on first call.
+func (d *DB) GetOrCreateIdentity() (*Identity, error) {
+	var privBytes, pubBytes []byte
+	err := d.db.QueryRow(`SELECT x25519_private_key, x25519_public_key FROM agent_identity WHERE id = 1`).
+		Scan(&privBytes, &pubBytes)
+	if err == nil {
+		priv, err := ecdh.X25519().NewPrivateKey(privBytes)
+		if err != nil {
+			return nil, fmt.Errorf("parse stored X25519 private key: %w", err)
+		}
+		return &Identity{
+			X25519PrivateKey: priv,
+			X25519PublicKey:  priv.PublicKey(),
+		}, nil
+	}
+	if err != sql.ErrNoRows {
+		return nil, fmt.Errorf("query agent_identity: %w", err)
+	}
+
+	// Generate new X25519 keypair
+	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generate X25519 keypair: %w", err)
+	}
+
+	_, err = d.db.Exec(
+		`INSERT INTO agent_identity (id, x25519_private_key, x25519_public_key) VALUES (1, ?, ?)`,
+		priv.Bytes(), priv.PublicKey().Bytes(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store X25519 keypair: %w", err)
+	}
+
+	return &Identity{
+		X25519PrivateKey: priv,
+		X25519PublicKey:  priv.PublicKey(),
+	}, nil
+}
+
+// StoreUserX25519Key stores a user's X25519 public key alongside their Ed25519 key.
+func (d *DB) StoreUserX25519Key(ed25519PubKey string, x25519PubKeyBytes []byte) error {
+	_, err := d.db.Exec(
+		`UPDATE authorized_keys SET x25519_public_key = ? WHERE public_key = ?`,
+		x25519PubKeyBytes, ed25519PubKey,
+	)
+	return err
+}
+
+// ListAuthorizedKeysWithX25519 returns X25519 public keys for all authorized users that have one.
+func (d *DB) ListAuthorizedKeysWithX25519() []*ecdh.PublicKey {
+	rows, err := d.db.Query(`SELECT x25519_public_key FROM authorized_keys WHERE x25519_public_key IS NOT NULL`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var keys []*ecdh.PublicKey
+	for rows.Next() {
+		var keyBytes []byte
+		if err := rows.Scan(&keyBytes); err != nil {
+			continue
+		}
+		pub, err := ecdh.X25519().NewPublicKey(keyBytes)
+		if err != nil {
+			continue
+		}
+		keys = append(keys, pub)
+	}
+	return keys
+}
+
+// GetUserX25519Key retrieves a user's X25519 public key by their Ed25519 public key.
+func (d *DB) GetUserX25519Key(ed25519PubKey string) (*ecdh.PublicKey, error) {
+	var keyBytes []byte
+	err := d.db.QueryRow(
+		`SELECT x25519_public_key FROM authorized_keys WHERE public_key = ?`,
+		ed25519PubKey,
+	).Scan(&keyBytes)
+	if err != nil {
+		return nil, err
+	}
+	if keyBytes == nil {
+		return nil, sql.ErrNoRows
+	}
+	return ecdh.X25519().NewPublicKey(keyBytes)
 }

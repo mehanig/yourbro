@@ -9,14 +9,11 @@ services:
     environment:
       FRONTEND_URL: http://localhost
       GOOGLE_REDIRECT_URL: http://localhost/auth/google/callback
-      ALLOW_HTTP_AGENT: "true"
 
   agent-server:
     build:
       context: .
       dockerfile: Dockerfile.agent
-    ports:
-      - "${AGENT_PORT:-9443}:${AGENT_PORT:-9443}"
     volumes:
       - agent-data:/data
     env_file:

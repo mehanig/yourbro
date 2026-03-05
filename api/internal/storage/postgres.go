@@ -247,24 +247,22 @@ func (db *DB) GetUserByPublicKey(ctx context.Context, publicKey string) (*models
 
 // Agents
 
-func (db *DB) CreateAgent(ctx context.Context, userID int64, name, endpoint string) (*models.Agent, error) {
+func (db *DB) CreateAgent(ctx context.Context, userID int64, name string) (*models.Agent, error) {
 	var a models.Agent
 	err := db.Pool.QueryRow(ctx, `
-		INSERT INTO agents (user_id, name, endpoint)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (user_id, endpoint) DO UPDATE SET name = $2
-		RETURNING id, user_id, name, endpoint, last_heartbeat, paired_at
-	`, userID, name, endpoint).Scan(&a.ID, &a.UserID, &a.Name, &a.Endpoint, &a.LastHeartbeat, &a.PairedAt)
+		INSERT INTO agents (user_id, name)
+		VALUES ($1, $2)
+		RETURNING id, user_id, name, paired_at
+	`, userID, name).Scan(&a.ID, &a.UserID, &a.Name, &a.PairedAt)
 	if err != nil {
 		return nil, err
 	}
-	a.IsOnline = a.LastHeartbeat != nil && time.Since(*a.LastHeartbeat) < 2*time.Minute
 	return &a, nil
 }
 
 func (db *DB) ListAgents(ctx context.Context, userID int64) ([]models.Agent, error) {
 	rows, err := db.Pool.Query(ctx, `
-		SELECT id, user_id, name, endpoint, last_heartbeat, paired_at
+		SELECT id, user_id, name, paired_at
 		FROM agents WHERE user_id = $1 ORDER BY paired_at DESC
 	`, userID)
 	if err != nil {
@@ -275,10 +273,9 @@ func (db *DB) ListAgents(ctx context.Context, userID int64) ([]models.Agent, err
 	var agents []models.Agent
 	for rows.Next() {
 		var a models.Agent
-		if err := rows.Scan(&a.ID, &a.UserID, &a.Name, &a.Endpoint, &a.LastHeartbeat, &a.PairedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.UserID, &a.Name, &a.PairedAt); err != nil {
 			return nil, err
 		}
-		a.IsOnline = a.LastHeartbeat != nil && time.Since(*a.LastHeartbeat) < 2*time.Minute
 		agents = append(agents, a)
 	}
 	return agents, nil
@@ -289,18 +286,29 @@ func (db *DB) DeleteAgent(ctx context.Context, id, userID int64) error {
 	return err
 }
 
-func (db *DB) UpdateHeartbeat(ctx context.Context, userID int64, endpoint string) error {
-	tag, err := db.Pool.Exec(ctx, `
-		UPDATE agents SET last_heartbeat = NOW()
-		WHERE user_id = $1 AND endpoint = $2
-	`, userID, endpoint)
+func (db *DB) GetAgentByID(ctx context.Context, id int64) (*models.Agent, error) {
+	var a models.Agent
+	err := db.Pool.QueryRow(ctx, `
+		SELECT id, user_id, name, paired_at
+		FROM agents WHERE id = $1
+	`, id).Scan(&a.ID, &a.UserID, &a.Name, &a.PairedAt)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("agent not found")
+	return &a, nil
+}
+
+// GetAgentByUserAndName finds an agent by user ID and name.
+func (db *DB) GetAgentByUserAndName(ctx context.Context, userID int64, name string) (*models.Agent, error) {
+	var a models.Agent
+	err := db.Pool.QueryRow(ctx, `
+		SELECT id, user_id, name, paired_at
+		FROM agents WHERE user_id = $1 AND name = $2
+	`, userID, name).Scan(&a.ID, &a.UserID, &a.Name, &a.PairedAt)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	return &a, nil
 }
 
 // RunMigrations runs SQL migration files in order.

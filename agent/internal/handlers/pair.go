@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -24,9 +25,10 @@ type PairHandler struct {
 }
 
 type pairRequest struct {
-	PairingCode   string `json:"pairing_code"`
-	UserPublicKey string `json:"user_public_key"`
-	Username      string `json:"username"`
+	PairingCode      string `json:"pairing_code"`
+	UserPublicKey    string `json:"user_public_key"`
+	Username         string `json:"username"`
+	UserX25519PubKey string `json:"user_x25519_public_key,omitempty"`
 }
 
 // Pair handles POST /api/pair.
@@ -91,10 +93,33 @@ func (h *PairHandler) Pair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Store user's X25519 public key if provided (for E2E encryption)
+	if req.UserX25519PubKey != "" {
+		x25519Bytes, err := base64.RawURLEncoding.DecodeString(req.UserX25519PubKey)
+		if err == nil && len(x25519Bytes) == 32 {
+			_ = h.DB.StoreUserX25519Key(req.UserPublicKey, x25519Bytes)
+		}
+	}
+
 	// Mark code as used (one-time)
 	h.used = true
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "paired"})
+	// Return agent's X25519 public key for E2E encryption
+	resp := map[string]string{"status": "paired"}
+	identity, err := h.DB.GetOrCreateIdentity()
+	if err == nil {
+		agentX25519B64 := base64.RawURLEncoding.EncodeToString(identity.X25519PublicKey.Bytes())
+		resp["agent_x25519_public_key"] = agentX25519B64
+		// Log fingerprint for out-of-band verification
+		fingerprint := agentX25519B64
+		if len(fingerprint) > 8 {
+			fingerprint = fingerprint[:8]
+		}
+		log.Printf("=== E2E FINGERPRINT: %s === (verify this matches your browser)", fingerprint)
+	}
+
+	log.Printf("Paired with user %q (Ed25519: %s...)", req.Username, req.UserPublicKey[:8])
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // RevokeKey handles DELETE /api/keys — removes the signing key from authorized_keys.

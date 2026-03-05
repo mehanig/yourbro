@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type User struct {
 	ID        int64     `json:"id"`
@@ -40,13 +43,11 @@ type PublicKey struct {
 }
 
 type Agent struct {
-	ID            int64      `json:"id"`
-	UserID        int64      `json:"user_id"`
-	Name          string     `json:"name"`
-	Endpoint      string     `json:"endpoint"`
-	LastHeartbeat *time.Time `json:"last_heartbeat"`
-	PairedAt      time.Time  `json:"paired_at"`
-	IsOnline      bool       `json:"is_online"`
+	ID       int64     `json:"id"`
+	UserID   int64     `json:"user_id"`
+	Name     string    `json:"name"`
+	PairedAt time.Time `json:"paired_at"`
+	IsOnline bool      `json:"is_online"`
 }
 
 // API request/response types
@@ -76,12 +77,34 @@ type CreateTokenResponse struct {
 }
 
 type RegisterAgentRequest struct {
-	Endpoint string `json:"endpoint"`
-	Name     string `json:"name"`
+	Name string `json:"name"`
 }
 
-type HeartbeatRequest struct {
-	Endpoint string `json:"endpoint"`
+type RelayRequest struct {
+	ID        string            `json:"id"`
+	Method    string            `json:"method,omitempty"`
+	Path      string            `json:"path,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Body      *string           `json:"body,omitempty"`
+	Encrypted bool              `json:"encrypted,omitempty"`
+	Payload   string            `json:"payload,omitempty"` // base64 of IV + AES-GCM ciphertext
+}
+
+type RelayResponse struct {
+	ID        string            `json:"id"`
+	Status    int               `json:"status,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Body      *string           `json:"body,omitempty"`
+	Encrypted bool              `json:"encrypted,omitempty"`
+	Payload   string            `json:"payload,omitempty"` // base64 of IV + AES-GCM ciphertext
+}
+
+// WireMessage is the WebSocket wire protocol envelope.
+type WireMessage struct {
+	Version int    `json:"v"`
+	Type    string `json:"type"` // "request" or "response"
+	ID      string `json:"id"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 type OAuthCallbackResponse struct {

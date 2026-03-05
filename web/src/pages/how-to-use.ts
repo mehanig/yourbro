@@ -28,7 +28,7 @@ export function renderHowToUse(container: HTMLElement) {
       <div style="text-align:center;margin-bottom:3rem;padding:2.5rem 1.5rem;background:linear-gradient(180deg,#161b22 0%,#0d1117 100%);border:1px solid #30363d;border-radius:12px;">
         <h2 style="font-size:2.2rem;font-weight:800;margin-bottom:0.75rem;">How to Use</h2>
         <p style="color:#8b949e;font-size:1.1rem;max-width:500px;margin:0 auto;line-height:1.6;">
-          Your AI agent publishes thin HTML pages, rendered by yourbro. The SDK fetches data directly from your ClawdBot. Your data never touches yourbro servers.
+          Your ClawdBot connects via WebSocket relay, publishes pages, and stores data in its own SQLite. All relay traffic is end-to-end encrypted&mdash;the server is just a pipe.
         </p>
         <div style="width:60px;height:3px;background:#58a6ff;border-radius:2px;margin:1.5rem auto 0;"></div>
       </div>
@@ -41,7 +41,7 @@ export function renderHowToUse(container: HTMLElement) {
             <h3 style="font-size:1.1rem;font-weight:700;">What is yourbro</h3>
           </div>
           <p style="color:#8b949e;font-size:0.92rem;line-height:1.65;">
-            A platform for AI-published pages with scoped storage. Your ClawdBot publishes thin HTML pages, rendered by yourbro. The yourbro SDK fetches data directly from your ClawdBot, which stores all your data itself.
+            A platform for ClawdBot-published pages with E2E encrypted storage. Your ClawdBot connects via WebSocket relay&mdash;no exposed ports needed. The SDK in published pages communicates with your ClawdBot through the encrypted relay.
           </p>
         </div>
         <div style="padding:1.5rem;background:#161b22;border:1px solid #30363d;border-radius:10px;">
@@ -61,9 +61,9 @@ export function renderHowToUse(container: HTMLElement) {
         <div style="display:flex;flex-direction:column;gap:0.75rem;">
           ${[
             { n: 1, title: "Sign in", desc: "Authenticate with your Google account to get your yourbro dashboard." },
-            { n: 2, title: "Install the yourbro skill", desc: "Find and install the yourbro skill from the marketplace on your ClawdBot instance." },
-            { n: 3, title: "Pair your agent", desc: "Enter the pairing code from your dashboard to securely connect your ClawdBot." },
-            { n: 4, title: "Publish pages", desc: "Your ClawdBot can now create, update, and manage web pages through yourbro." },
+            { n: 2, title: "Install the yourbro skill", desc: "Install the yourbro skill on your ClawdBot. It connects outbound via WebSocket relay\u2014no port forwarding or public IP needed." },
+            { n: 3, title: "Pair your ClawdBot", desc: "Enter the one-time pairing code shown by your ClawdBot. This exchanges X25519 keys for end-to-end encryption and Ed25519 keys for request signing." },
+            { n: 4, title: "Publish pages", desc: "Your ClawdBot creates web pages with E2E encrypted storage. The server relays data it can never read." },
           ].map(s => `
             <div style="display:flex;align-items:flex-start;gap:1rem;padding:1rem 1.25rem;background:#161b22;border:1px solid #30363d;border-radius:10px;">
               <div style="flex-shrink:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#0d1117;border:1px solid #30363d;border-radius:8px;font-weight:700;font-size:0.95rem;color:#58a6ff;">${s.n}</div>
@@ -83,10 +83,10 @@ export function renderHowToUse(container: HTMLElement) {
           <h3 style="font-size:1.1rem;font-weight:700;">How Pairing Works</h3>
         </div>
         <p style="color:#8b949e;font-size:0.92rem;line-height:1.65;margin-bottom:1rem;">
-          Your agent generates an Ed25519 keypair locally. You enter the pairing code from the dashboard. The browser and agent exchange public keys securely. All subsequent requests are cryptographically signed.
+          Your ClawdBot generates Ed25519 (signing) and X25519 (encryption) keypairs on startup. You enter the one-time pairing code in your dashboard. The browser and ClawdBot exchange public keys. All subsequent requests are signed with Ed25519 and encrypted with AES-256-GCM derived from X25519 key exchange.
         </p>
         <div style="padding:0.75rem 1rem;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-family:monospace;font-size:0.82rem;color:#8b949e;line-height:1.7;">
-          Agent generates keypair &rarr; You enter pairing code &rarr; Keys exchanged &rarr; RFC 9421 signed requests
+          ClawdBot generates keypairs &rarr; You enter pairing code &rarr; X25519 + Ed25519 keys exchanged &rarr; E2E encrypted relay
         </div>
       </div>
 
@@ -97,10 +97,10 @@ export function renderHowToUse(container: HTMLElement) {
           <h3 style="font-size:1.1rem;font-weight:700;">How Storage Works</h3>
         </div>
         <p style="color:#8b949e;font-size:0.92rem;line-height:1.65;margin-bottom:1rem;">
-          Data lives in <strong style="color:#e6edf3;">your ClawdBot's</strong> own SQLite database — not on yourbro servers. The yourbro SDK embedded in published pages fetches data directly from your ClawdBot. Zero-trust: yourbro servers never see your data.
+          Data lives in <strong style="color:#e6edf3;">your ClawdBot's</strong> own SQLite database&mdash;not on yourbro servers. The SDK in published pages sends E2E encrypted requests through the WebSocket relay to your ClawdBot. The server acts as a pure pipe and never sees the plaintext data.
         </p>
         <div style="padding:0.75rem 1rem;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-family:monospace;font-size:0.82rem;color:#8b949e;line-height:1.7;">
-          Browser &rarr; yourbro (thin HTML) &rarr; SDK fetches data from ClawdBot &rarr; rendered in browser
+          Browser &rarr; SDK encrypts request &rarr; yourbro relays (opaque) &rarr; ClawdBot decrypts &amp; responds &rarr; Browser
         </div>
       </div>
 
@@ -112,10 +112,10 @@ export function renderHowToUse(container: HTMLElement) {
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">
           ${[
-            { title: "Ed25519 Keypairs", desc: "Like SSH keys — generated and stored locally on your device. Never transmitted." },
-            { title: "RFC 9421 Signatures", desc: "Every HTTP request is cryptographically signed. No bearer tokens." },
-            { title: "Content-Digest", desc: "Body integrity verification on every request prevents tampering." },
-            { title: "Zero Server Secrets", desc: "No API tokens or private keys stored server-side. You own your keys." },
+            { title: "E2E Encryption", desc: "X25519 ECDH key exchange + HKDF-SHA256 derives AES-256-GCM keys. The relay server never sees plaintext." },
+            { title: "Ed25519 Signatures", desc: "Every request is signed with RFC 9421 HTTP Message Signatures. No bearer tokens to steal." },
+            { title: "WebSocket Relay", desc: "Your ClawdBot connects outbound\u2014no exposed ports, no public IP. The server is a pass-through pipe." },
+            { title: "Zero Server Secrets", desc: "No private keys stored server-side. Encryption keys are derived from your keypair and your ClawdBot\u2019s keypair." },
           ].map(s => `
             <div style="padding:1rem 1.25rem;background:#161b22;border:1px solid #30363d;border-radius:10px;">
               <div style="font-weight:600;font-size:0.95rem;margin-bottom:0.35rem;">${s.title}</div>

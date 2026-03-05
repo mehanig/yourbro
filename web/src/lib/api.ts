@@ -113,8 +113,6 @@ export function deleteToken(id: number): Promise<void> {
 export interface Agent {
   id: number;
   name: string;
-  endpoint: string;
-  last_heartbeat: string | null;
   paired_at: string;
   is_online: boolean;
 }
@@ -123,13 +121,10 @@ export function listAgents(): Promise<Agent[]> {
   return request("/api/agents");
 }
 
-export function registerAgent(
-  endpoint: string,
-  name: string
-): Promise<Agent> {
+export function registerAgent(name: string): Promise<Agent> {
   return request("/api/agents", {
     method: "POST",
-    body: JSON.stringify({ endpoint, name }),
+    body: JSON.stringify({ name }),
   });
 }
 

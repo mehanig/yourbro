@@ -43,9 +43,11 @@ Publish thin HTML pages to yourbro.ai with zero-trust, agent-backed storage. You
 ClawdBot publishes HTML page -> yourbro.ai renders it -> SDK in page fetches data from your agent -> displayed in browser
 ```
 
-Your agent (yourbro-agent) runs on your machine and stores data in its own SQLite database. Pages published to yourbro.ai are thin HTML shells. The yourbro SDK embedded in those pages fetches data directly from your agent using Ed25519-signed requests.
+Your agent (yourbro-agent) runs on your machine and stores data in its own SQLite database. Pages published to yourbro.ai are thin HTML shells. The yourbro SDK embedded in those pages fetches data from your agent using Ed25519-signed requests.
 
-## Setup
+The agent connects to yourbro.ai via an outbound WebSocket — no exposed ports, no DNS, no TLS certificates needed.
+
+## Setup (Relay Mode — Recommended)
 
 ### 1. Get a yourbro API token
 
@@ -69,23 +71,28 @@ Set it in your OpenClaw configuration:
 
 ### 2. Start the agent
 
-The `yourbro-agent` binary is your personal data storage server. Start it:
+The `yourbro-agent` binary is your personal data storage server. Set your API token and server URL, then start it:
 
 ```bash
+export YOURBRO_TOKEN="yb_your_token_here"
+export YOURBRO_SERVER_URL="https://yourbro.ai"
 yourbro-agent
 ```
 
-On first start, it prints a pairing code:
+The agent connects to yourbro.ai via WebSocket automatically. On first start, it prints a pairing code:
 
 ```
 === PAIRING CODE: A7X3KP9M (expires in 5 minutes) ===
+Relay mode: connecting to wss://yourbro.ai/ws/agent
 ```
+
+No ports to open. No domain name needed. Works behind NAT/firewalls.
 
 To run as a background service, see `contrib/yourbro-agent.service` (Linux systemd) or `contrib/com.yourbro.agent.plist` (macOS launchd).
 
 ### 3. Pair your agent
 
-Go to your yourbro.ai dashboard. Enter the agent endpoint URL (e.g., `https://your-domain:9443`) and the pairing code. This exchanges Ed25519 public keys between your browser and agent.
+Go to your yourbro.ai dashboard. Your agent appears in the "Paired Agents" list as online (relay). Select it from the dropdown, enter the pairing code, and click "Pair". This exchanges Ed25519 public keys between your browser and agent.
 
 ### 4. Publish pages
 
@@ -95,18 +102,17 @@ Ask your ClawdBot to publish a page. It will use this skill to:
 2. POST to yourbro.ai/api/pages with your token
 3. The page goes live at `https://yourbro.ai/p/USERNAME/SLUG`
 
+Pages with agent storage automatically use the relay — the SDK routes requests through yourbro.ai to your agent.
+
 ## Configuration
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `YOURBRO_TOKEN` | Yes | -- | API token from yourbro.ai dashboard |
-| `AGENT_PORT` | No | `9443` | Port the agent listens on |
-| `AGENT_DOMAIN` | No | -- | Domain for automatic TLS (omit for local dev) |
+| `YOURBRO_TOKEN` | Yes | -- | API token from yourbro.ai dashboard (used by both ClawdBot and the agent) |
+| `YOURBRO_SERVER_URL` | Yes | -- | yourbro server URL (e.g., `https://yourbro.ai`) |
 | `SQLITE_PATH` | No | `~/.yourbro/agent.db` | SQLite database path |
-| `YB_SERVER_URL` | No | -- | yourbro server URL for heartbeat (e.g., `https://yourbro.ai`) |
-| `YB_AGENT_ENDPOINT` | No | -- | Public URL of this agent for heartbeat |
 
-Set agent environment variables before starting `yourbro-agent`, or use the systemd/launchd service files in `contrib/`.
+Two env vars (`YOURBRO_TOKEN` + `YOURBRO_SERVER_URL`) are all you need.
 
 ## Usage
 
@@ -130,14 +136,10 @@ When the user asks you to publish a page or create a web page on yourbro:
        "slug": "my-page",
        "title": "My Page",
        "html_content": "<html>...</html>",
-       "agent_endpoint": "https://agent.example.com:9443"
+       "agent_endpoint": "relay:AGENT_ID"
      }'
    ```
-
-   Or use the helper script:
-   ```bash
-   ./scripts/publish.sh my-page "My Page" page.html
-   ```
+   Replace `AGENT_ID` with your agent's ID from the dashboard.
 
 4. **Share the URL**: `https://yourbro.ai/p/USERNAME/SLUG`
 
@@ -186,9 +188,9 @@ curl -X POST https://yourbro.ai/api/pages \
   }'
 ```
 
-### Page with agent-backed storage
+### Page with agent-backed storage (relay mode)
 
-Publish with an `agent_endpoint`. The ClawdStorage SDK handles auth automatically:
+Publish with `agent_endpoint` set to `relay:{agent_id}` (the dashboard shows the agent ID). The ClawdStorage SDK handles auth and relay routing automatically:
 
 ```javascript
 const storage = await ClawdStorage.init();

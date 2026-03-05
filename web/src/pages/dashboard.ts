@@ -5,7 +5,6 @@ import {
   createToken,
   deleteToken,
   deletePage,
-  registerAgent,
   deleteAgent,
   clearToken,
   type User,
@@ -13,11 +12,39 @@ import {
   type Token,
   type Agent,
 } from "../lib/api";
-import { getOrCreateKeypair, base64RawUrlEncode, signedFetch } from "../lib/crypto";
+import {
+  getOrCreateKeypair,
+  getOrCreateX25519Keypair,
+  storeAgentX25519Key,
+  base64RawUrlEncode,
+  base64RawUrlDecode,
+} from "../lib/crypto";
+
+/** Active SSE connection — closed before re-render to prevent leaks. */
+let activeSSE: EventSource | null = null;
+
+/** Escape HTML entities to prevent XSS when interpolating user-controlled data. */
+function esc(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 function renderAgentsList(agents: Agent[], container: HTMLElement) {
   const listEl = container.querySelector("#agents-list");
   if (!listEl) return;
+
+  // Update relay agent dropdown for pairing
+  const relaySelect = container.querySelector("#pair-relay-agent") as HTMLSelectElement | null;
+  if (relaySelect) {
+    const onlineAgents = agents.filter(a => a.is_online);
+    relaySelect.innerHTML = onlineAgents.length === 0
+      ? '<option value="">No agents online</option>'
+      : onlineAgents.map(a => `<option value="${a.id}">${esc(a.name || "unnamed")} (#${a.id})</option>`).join("");
+  }
 
   listEl.innerHTML =
     agents.length === 0
@@ -29,11 +56,10 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
             <div style="display:flex;align-items:center;gap:0.75rem;">
               <span style="color:${a.is_online ? "#3fb950" : "#656d76"};font-size:1.2rem;">${a.is_online ? "●" : "○"}</span>
               <div>
-                <span style="font-weight:600;">${a.name || "unnamed"}</span>
-                <span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">${a.endpoint}</span>
+                <span style="font-weight:600;">${esc(a.name || "unnamed")}</span>
               </div>
             </div>
-            <button class="delete-agent" data-id="${a.id}" data-endpoint="${a.endpoint}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Remove</button>
+            <button class="delete-agent" data-id="${a.id}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Remove</button>
           </div>
         `
           )
@@ -43,25 +69,43 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
   listEl.querySelectorAll(".delete-agent").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const id = Number((btn as HTMLElement).dataset.id);
-      const endpoint = (btn as HTMLElement).dataset.endpoint;
       if (!confirm("Remove this agent?")) return;
 
-      // Step 1: Revoke key on agent — must succeed before removing server record
-      if (endpoint) {
-        try {
-          const res = await signedFetch("DELETE", `${endpoint}/api/keys`);
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({ error: res.statusText }));
-            alert(`Can't unpair: ${data.error || res.statusText}`);
-            return;
-          }
-        } catch {
-          alert("Can't unpair: agent is offline or unreachable.\nTry again when the agent is back online.");
+      // Revoke key on agent via relay
+      try {
+        const { publicKeyBytes } = await getOrCreateKeypair();
+        const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
+        const created = Math.floor(Date.now() / 1000);
+        const nonce = crypto.randomUUID();
+        const sigParams = `("@method" "@target-uri");created=${created};nonce="${nonce}";keyid="${pubKeyB64}"`;
+        const signatureBase = `"@method": DELETE\n"@target-uri": https://relay.internal/api/keys\n"@signature-params": ${sigParams}`;
+        const sig = await crypto.subtle.sign("Ed25519", (await getOrCreateKeypair()).privateKey, new TextEncoder().encode(signatureBase));
+        const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
+
+        const res = await fetch(`/api/relay/${id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: crypto.randomUUID(),
+            method: "DELETE",
+            path: "/api/keys",
+            headers: {
+              "Signature-Input": `sig1=${sigParams}`,
+              "Signature": `sig1=:${sigB64}:`,
+            },
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: res.statusText }));
+          alert(`Can't unpair: ${data.error || res.statusText}`);
           return;
         }
+      } catch (err) {
+        alert("Can't unpair: relay failed.\n" + (err instanceof Error ? err.message : String(err)));
+        return;
       }
 
-      // Step 2: Agent confirmed revocation — now safe to remove from server
+      // Agent confirmed revocation — now safe to remove from server
       await deleteAgent(id);
       renderDashboard(container);
     });
@@ -69,6 +113,12 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
 }
 
 export async function renderDashboard(container: HTMLElement) {
+  // Close previous SSE connection to prevent leaks on re-render
+  if (activeSSE) {
+    activeSSE.close();
+    activeSSE = null;
+  }
+
   container.innerHTML = `<p style="color:#8b949e;">Loading...</p>`;
 
   let user: User;
@@ -89,7 +139,7 @@ export async function renderDashboard(container: HTMLElement) {
     <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;padding-bottom:1rem;border-bottom:1px solid #30363d;">
       <h1 style="font-size:1.5rem;font-weight:700;">yourbro</h1>
       <div style="display:flex;align-items:center;gap:1rem;">
-        <span style="color:#8b949e;">${user.email}</span>
+        <span style="color:#8b949e;">${esc(user.email)}</span>
         <a href="#/how-to-use" style="color:#58a6ff;text-decoration:none;font-size:0.9rem;">How to Use</a>
         <button id="logout-btn" style="padding:0.4rem 0.8rem;background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:6px;cursor:pointer;">Logout</button>
       </div>
@@ -100,16 +150,17 @@ export async function renderDashboard(container: HTMLElement) {
       <div id="agents-list">
         <p style="color:#656d76;">Connecting...</p>
       </div>
-      <p style="color:#656d76;font-size:0.8rem;margin-top:0.5rem;">● online (heartbeat &lt; 2 min) &nbsp; ○ offline</p>
+      <p style="color:#656d76;font-size:0.8rem;margin-top:0.5rem;">● online &nbsp; ○ offline &nbsp; <span style="color:#58a6ff;">relay</span> = connected via WebSocket</p>
     </section>
 
     <section style="margin-bottom:2rem;">
       <h2 style="font-size:1.2rem;margin-bottom:1rem;">Pair New Agent</h2>
-      <p style="color:#8b949e;margin-bottom:1rem;font-size:0.9rem;">Connect your browser to an agent machine. Enter the agent endpoint URL, pairing code from logs, and an optional name.</p>
-      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-        <input id="pair-endpoint" type="text" placeholder="http://localhost:9443" style="flex:1;min-width:200px;padding:0.5rem;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;" />
+      <p style="color:#8b949e;margin-bottom:1rem;font-size:0.9rem;">
+        Select an online relay agent and enter its pairing code to pair.
+      </p>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+        <select id="pair-relay-agent" style="padding:0.5rem;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;min-width:160px;"></select>
         <input id="pair-code" type="text" placeholder="Pairing code" style="width:140px;padding:0.5rem;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;font-family:monospace;" />
-        <input id="pair-name" type="text" placeholder="Name (optional)" style="width:160px;padding:0.5rem;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;" />
         <button id="pair-btn" style="padding:0.5rem 1rem;background:#1a2e1d;border:1px solid #2a5a30;color:#3fb950;border-radius:6px;cursor:pointer;">Pair</button>
       </div>
       <div id="pair-status" style="margin-top:0.75rem;display:none;padding:0.75rem;border-radius:8px;font-size:0.9rem;"></div>
@@ -126,8 +177,8 @@ export async function renderDashboard(container: HTMLElement) {
                   (p: Page) => `
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
                   <div>
-                    <a href="/p/${user.username}/${p.slug}" target="_blank" style="color:#58a6ff;text-decoration:none;font-weight:600;">${p.title || p.slug}</a>
-                    <span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">/${user.username}/${p.slug}</span>
+                    <a href="/p/${esc(user.username)}/${esc(p.slug)}" target="_blank" style="color:#58a6ff;text-decoration:none;font-weight:600;">${esc(p.title || p.slug)}</a>
+                    <span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">/${esc(user.username)}/${esc(p.slug)}</span>
                   </div>
                   <button class="delete-page" data-id="${p.id}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Delete</button>
                 </div>
@@ -146,8 +197,8 @@ export async function renderDashboard(container: HTMLElement) {
             (t: Token) => `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
               <div>
-                <span style="font-weight:600;">${t.name}</span>
-                <span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">${t.scopes.join(", ")}</span>
+                <span style="font-weight:600;">${esc(t.name)}</span>
+                <span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">${esc(t.scopes.join(", "))}</span>
               </div>
               <button class="delete-token" data-id="${t.id}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Revoke</button>
             </div>
@@ -164,7 +215,8 @@ export async function renderDashboard(container: HTMLElement) {
   `;
 
   // SSE for real-time agent status (cookie-based auth, no token in URL)
-  const evtSource = new EventSource("/api/agents/stream");
+  activeSSE = new EventSource("/api/agents/stream");
+  const evtSource = activeSSE;
   evtSource.onmessage = (event) => {
     try {
       const agents: Agent[] = JSON.parse(event.data);
@@ -174,6 +226,7 @@ export async function renderDashboard(container: HTMLElement) {
   evtSource.onerror = () => {
     // On error, close and fall back to static list
     evtSource.close();
+    activeSSE = null;
     // Load once as fallback
     import("../lib/api").then(({ listAgents }) => {
       listAgents().then((agents) => renderAgentsList(agents || [], container));
@@ -183,6 +236,7 @@ export async function renderDashboard(container: HTMLElement) {
   // Close SSE when navigating away
   const cleanup = () => {
     evtSource.close();
+    activeSSE = null;
     window.removeEventListener("hashchange", cleanup);
   };
   window.addEventListener("hashchange", cleanup);
@@ -190,6 +244,7 @@ export async function renderDashboard(container: HTMLElement) {
   // Event handlers
   document.getElementById("logout-btn")?.addEventListener("click", async () => {
     evtSource.close();
+    activeSSE = null;
     await fetch("/api/logout", { method: "POST" });
     clearToken();
     window.location.hash = "#/login";
@@ -229,24 +284,30 @@ export async function renderDashboard(container: HTMLElement) {
       document.getElementById("new-token-value")!.textContent = resp.token;
     });
 
+  const pairRelaySelect = document.getElementById("pair-relay-agent") as HTMLSelectElement;
+
   document.getElementById("pair-btn")?.addEventListener("click", async () => {
-    const endpoint = (
-      document.getElementById("pair-endpoint") as HTMLInputElement
-    ).value.trim().replace(/\/$/, "");
     const code = (
       document.getElementById("pair-code") as HTMLInputElement
     ).value.trim();
-    const name = (
-      document.getElementById("pair-name") as HTMLInputElement
-    ).value.trim() || new URL(endpoint || "http://unknown").hostname;
     const status = document.getElementById("pair-status")!;
+    const agentId = pairRelaySelect.value;
 
-    if (!endpoint || !code) {
+    if (!code) {
       status.style.display = "block";
       status.style.background = "#2d1214";
       status.style.border = "1px solid #5a1d22";
       status.style.color = "#f85149";
-      status.textContent = "Both endpoint and pairing code are required.";
+      status.textContent = "Pairing code is required.";
+      return;
+    }
+
+    if (!agentId) {
+      status.style.display = "block";
+      status.style.background = "#2d1214";
+      status.style.border = "1px solid #5a1d22";
+      status.style.color = "#f85149";
+      status.textContent = "Select an online agent to pair with.";
       return;
     }
 
@@ -254,25 +315,35 @@ export async function renderDashboard(container: HTMLElement) {
     status.style.background = "#161b22";
     status.style.border = "1px solid #30363d";
     status.style.color = "#8b949e";
-    status.textContent = "Generating keypair and pairing...";
+    status.textContent = "Pairing via relay...";
 
     try {
-      // Step 1: Pair with agent (send public key + pairing code)
       const { publicKeyBytes } = await getOrCreateKeypair();
       const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
 
-      const res = await fetch(`${endpoint}/api/pair`, {
+      // Get X25519 keypair for E2E encryption
+      const x25519kp = await getOrCreateX25519Keypair();
+      const x25519PubB64 = base64RawUrlEncode(x25519kp.publicKeyBytes);
+
+      const res = await fetch(`/api/relay/${agentId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pairing_code: code,
-          user_public_key: pubKeyB64,
-          username: user.username,
+          id: crypto.randomUUID(),
+          method: "POST",
+          path: "/api/pair",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pairing_code: code,
+            user_public_key: pubKeyB64,
+            user_x25519_public_key: x25519PubB64,
+            username: user.username,
+          }),
         }),
       });
 
-      const data = await res.json();
       if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: res.statusText }));
         status.style.background = "#2d1214";
         status.style.border = "1px solid #5a1d22";
         status.style.color = "#f85149";
@@ -280,23 +351,29 @@ export async function renderDashboard(container: HTMLElement) {
         return;
       }
 
-      // Step 2: Register agent on yourbro server
-      status.textContent = "Registering agent on server...";
-      try {
-        await registerAgent(endpoint, name);
-      } catch (regErr: unknown) {
-        status.style.background = "#1a1700";
-        status.style.border = "1px solid #3d3517";
-        status.style.color = "#d29922";
-        status.textContent = `Paired, but server registration failed: ${regErr instanceof Error ? regErr.message : String(regErr)}. Heartbeat won't work.`;
-        return;
+      // Store agent's X25519 public key for E2E encryption
+      const pairResp = await res.json().catch(() => ({}));
+      let fingerprint = "";
+      if (pairResp.agent_x25519_public_key) {
+        const agentX25519Bytes = base64RawUrlDecode(pairResp.agent_x25519_public_key);
+        await storeAgentX25519Key(agentId, agentX25519Bytes);
+        fingerprint = pairResp.agent_x25519_public_key.substring(0, 8);
       }
 
       status.style.background = "#0f1a10";
       status.style.border = "1px solid #1b3a20";
       status.style.color = "#3fb950";
-      status.textContent = "Paired and registered successfully!";
-      // SSE will auto-update the agents list
+      if (fingerprint) {
+        status.innerHTML = "";
+        status.appendChild(document.createTextNode("Paired successfully! "));
+        const fpSpan = document.createElement("span");
+        fpSpan.style.cssText = "font-family:monospace;background:#161b22;padding:2px 6px;border-radius:3px;border:1px solid #30363d;color:#58a6ff";
+        fpSpan.textContent = "E2E: " + fingerprint;
+        fpSpan.title = "Verify this matches the fingerprint shown in your agent terminal";
+        status.appendChild(fpSpan);
+      } else {
+        status.textContent = "Paired successfully!";
+      }
     } catch (err: unknown) {
       status.style.display = "block";
       status.style.background = "#2d1214";

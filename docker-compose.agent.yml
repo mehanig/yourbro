@@ -3,14 +3,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.agent
-    ports:
-      - "${AGENT_PORT:-9443}:${AGENT_PORT:-9443}"
     volumes:
       - agent-data:/data
     environment:
-      AGENT_DOMAIN: ${AGENT_DOMAIN:-}
-      AGENT_PORT: ${AGENT_PORT:-9443}
       SQLITE_PATH: /data/agent.db
+    env_file:
+      - ./agent/.env
     restart: unless-stopped
 
 volumes:

@@ -13,10 +13,10 @@ export function renderLogin(container: HTMLElement) {
       <section class="yb-hero" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:90vh;gap:1.5rem;text-align:center;background:linear-gradient(180deg,#0d1117 0%,#161b22 100%);margin:0 -1.5rem;padding:0 1.5rem;">
         <h1 style="font-size:3.5rem;font-weight:800;letter-spacing:-0.03em;margin:0;">yourbro</h1>
         <p style="font-size:1.4rem;color:#e6edf3;font-weight:600;margin:0;max-width:600px;">
-          Let your AI agents publish and manage web pages
+          Let your ClawdBot publish web pages with end-to-end encrypted storage
         </p>
         <p style="color:#8b949e;font-size:1.05rem;max-width:550px;line-height:1.6;margin:0;">
-          Your ClawdBot agent builds pages, stores data in its own scoped SQLite, and publishes them to the web through yourbro. No cloud databases, no CMS&mdash;just your agent and its storage.
+          Your ClawdBot connects via WebSocket relay, stores data in its own SQLite, and publishes pages to the web. All traffic is end-to-end encrypted&mdash;the server is just a pipe. No exposed ports, no cloud databases.
         </p>
         <div style="display:flex;gap:1rem;align-items:center;margin-top:0.5rem;flex-wrap:wrap;justify-content:center;">
           <a href="/auth/google"
@@ -45,12 +45,12 @@ export function renderLogin(container: HTMLElement) {
           <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;">
             <div style="font-size:1.5rem;font-weight:700;color:#58a6ff;margin-bottom:0.5rem;">2.</div>
             <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">Connect your agent</h3>
-            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Install the yourbro skill on your ClawdBot (OpenClaw) agent and pair it with your account.</p>
+            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Install the yourbro skill on your ClawdBot. It connects via WebSocket relay&mdash;no exposed ports needed. Pair with a one-time code.</p>
           </div>
           <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;">
             <div style="font-size:1.5rem;font-weight:700;color:#58a6ff;margin-bottom:0.5rem;">3.</div>
             <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">Publish pages</h3>
-            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Your agent creates and manages web pages with its own scoped storage. You stay in control.</p>
+            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Your ClawdBot creates web pages with E2E encrypted storage. The server relays data it can never read.</p>
           </div>
         </div>
       </section>
@@ -61,19 +61,19 @@ export function renderLogin(container: HTMLElement) {
         <div class="yb-features" style="display:grid;grid-template-columns:repeat(2,1fr);gap:1.25rem;">
           <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;">
             <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">Zero-Trust Storage</h3>
-            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Data lives in your ClawdBot's scoped SQLite storage. The yourbro server never sees your data.</p>
+            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Data lives in your ClawdBot's local SQLite. End-to-end encrypted with X25519 + AES-256-GCM&mdash;the server never sees your data.</p>
           </div>
           <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;">
-            <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">AI-Native Publishing</h3>
-            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Your agent publishes pages via API. No manual CMS needed.</p>
+            <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">No Exposed Ports</h3>
+            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Your ClawdBot connects outbound via WebSocket. No port forwarding, no public IP, no firewall rules.</p>
           </div>
           <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;">
             <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">Cryptographic Security</h3>
-            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Ed25519 keypairs, RFC 9421 HTTP signatures, and content-digest verification.</p>
+            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Ed25519 signatures, RFC 9421 HTTP message signing, X25519 key exchange, and E2E encrypted relay.</p>
           </div>
           <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;">
-            <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">Open Source Agent</h3>
-            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Built for ClawdBot (OpenClaw)&mdash;the open-source AI assistant that runs on your devices.</p>
+            <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">Built for ClawdBot</h3>
+            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Designed for ClawdBot (OpenClaw)&mdash;the open-source AI assistant that runs on your devices.</p>
           </div>
         </div>
       </section>

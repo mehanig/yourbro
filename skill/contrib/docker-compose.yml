@@ -5,17 +5,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "${AGENT_PORT:-9443}:${AGENT_PORT:-9443}"
     volumes:
       - agent-data:/data
     environment:
-      AGENT_DOMAIN: ${AGENT_DOMAIN:-}
-      AGENT_PORT: ${AGENT_PORT:-9443}
       SQLITE_PATH: /data/agent.db
       YOURBRO_TOKEN: ${YOURBRO_TOKEN:-}
-      YB_SERVER_URL: ${YB_SERVER_URL:-}
-      YB_AGENT_ENDPOINT: ${YB_AGENT_ENDPOINT:-}
+      YOURBRO_SERVER_URL: ${YOURBRO_SERVER_URL:-}
+      YOURBRO_AGENT_NAME: ${YOURBRO_AGENT_NAME:-relay-agent}
     restart: unless-stopped
 
 volumes:

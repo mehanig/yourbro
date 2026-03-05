@@ -8,10 +8,10 @@ There are **two separate systems** working together:
 
 ### 1. Page Publishing (AI Agent → yourbro server)
 
-Your AI agent (Claude, etc.) publishes HTML pages to yourbro.ai using an API token. The page includes an `agent_endpoint` URL pointing back to your machine.
+Your AI agent (Claude, etc.) publishes HTML pages to yourbro.ai using an API token. The page includes a `relay:{agent_id}` endpoint that routes data requests through the yourbro WebSocket relay to your agent.
 
 ```
-You (human)                    AI Agent (Claude, etc.)           yourbro.ai
+You (human)                     ClawdBot                         yourbro.ai
     │                               │                               │
     ├── Create API token ──────────>│                               │
     │   (dashboard)                 │                               │
@@ -21,40 +21,40 @@ You (human)                    AI Agent (Claude, etc.)           yourbro.ai
     │                               │                               │   (no user data)
 ```
 
-### 2. Data Storage (Browser → Agent machine, direct)
+### 2. Data Storage (Browser → Agent via WebSocket Relay)
 
-When someone visits a page, the browser talks **directly** to the agent machine. The yourbro server is not involved — it just served the page HTML. Auth uses Ed25519 keypairs with [RFC 9421 HTTP Message Signatures](https://www.rfc-editor.org/rfc/rfc9421).
+When someone visits a page, the browser sends requests to the yourbro server which relays them to your agent via a persistent WebSocket connection. Your agent processes the request and responds via the same WebSocket. Auth uses Ed25519 keypairs with [RFC 9421 HTTP Message Signatures](https://www.rfc-editor.org/rfc/rfc9421).
 
 ```
 PAIRING (one-time):
 
-Browser                              Agent Machine
+Browser                              Agent Machine (via relay)
 ┌──────────────────┐                ┌──────────────────┐
 │ Generate Ed25519 │                │ Print pairing    │
 │ keypair (WebCrypto)               │ code in logs     │
 │                  │                │                  │
 │ Enter code in    │                │                  │
 │ dashboard ───────┼── POST /pair ─>│ Verify code      │
-│                  │   (direct)     │ Store public key │
+│                  │   (via relay)  │ Store public key │
 └──────────────────┘                └──────────────────┘
 
 RUNTIME (every request, signed per RFC 9421):
 
-Browser                              Agent
-   │                                    │
-   │── Signature-Input: sig1=(...)  ───>│
-   │   Signature: sig1=:base64sig:      │── verify Ed25519 signature
-   │   Content-Digest: sha-256=:...:    │── check timestamp ±5min
-   │                                    │── check nonce (replay protection)
-   │<── JSON data ──────────────────────│
+Browser              yourbro.ai              ClawdBot
+   │                    │                       │
+   │── POST /relay/ID ─>│── WebSocket msg ─────>│
+   │                    │                       │── verify Ed25519 signature
+   │                    │                       │── check timestamp ±5min
+   │                    │<── WebSocket resp ────│
+   │<── JSON data ──────│                       │
 
-   yourbro server is NOT in the data path.
+   yourbro server is a relay pipe — it never sees plaintext data (E2E encrypted).
 ```
 
 ### Zero-Trust Guarantees
 
 - **Server DB dump** → only public keys + page metadata, zero user data
-- **Server admin snoops** → server never has auth material to forge agent requests
+- **Server admin snoops** → E2E encryption means relay traffic is opaque to the server
 - **Agent A compromised** → cannot read Agent B (separate SQLite, separate keys)
 - **Server JS injection** → WebCrypto non-extractable keys prevent key theft; malicious JS can use the key while tab is open (full protection requires native app)
 
@@ -91,7 +91,21 @@ docker compose -f docker-compose.prod.yml -f docker-compose.local.yml --profile 
 2. Login with Google
 3. In the dashboard, click **"+ New Token"** — copy the token (shown once)
 
-### 4. Pair Your Browser with the Agent
+### 4. Configure the Agent
+
+The agent runs as a ClawdBot (OpenClaw) skill. In ClawdBot, set the `YOURBRO_TOKEN` environment variable to your API token — ClawdBot handles the rest.
+
+For the local Docker setup, the agent container reads from `agent/.env`:
+
+```bash
+YOURBRO_TOKEN=yb_your_token_here
+YOURBRO_SERVER_URL=http://nginx
+SQLITE_PATH=/data/agent.db
+```
+
+The agent connects to the server via WebSocket automatically. No ports to open, no domain needed.
+
+### 5. Pair Your Browser with the Agent
 
 The agent prints a pairing code on startup:
 
@@ -100,16 +114,13 @@ docker compose -f docker-compose.prod.yml -f docker-compose.local.yml logs agent
 # === PAIRING CODE: A7X3KP9M (expires in 5 minutes) ===
 ```
 
-In the dashboard, scroll to **"Pair Agent"**:
-- **Endpoint:** `http://localhost:9443`
-- **Pairing code:** the code from the logs
-- Click **"Pair"**
+In the dashboard, your agent appears in the "Paired Agents" section as online. Select it from the dropdown, enter the pairing code, and click **"Pair"**.
 
 This generates an Ed25519 keypair in your browser and registers it with the agent. One-time setup.
 
-### 5. Publish a Page
+### 6. Publish a Page
 
-Use your API token to publish a page with an agent endpoint:
+Use your API token to publish a page with a relay agent endpoint:
 
 ```bash
 curl -X POST http://localhost/api/pages \
@@ -119,15 +130,17 @@ curl -X POST http://localhost/api/pages \
     "slug": "hello",
     "title": "Hello World",
     "html_content": "<html><head></head><body><h1>Loading...</h1><script>setTimeout(async()=>{const s=window.clawdStorage;if(!s)return;await s.set(\"msg\",\"Hello from agent storage!\");const v=await s.get(\"msg\");document.body.innerHTML=\"<h1>\"+v+\"</h1>\"},2000)</script></body></html>",
-    "agent_endpoint": "http://localhost:9443"
+    "agent_endpoint": "relay:AGENT_ID"
   }'
 ```
 
-### 6. Visit Your Page
+Replace `AGENT_ID` with your agent's ID from the dashboard.
+
+### 7. Visit Your Page
 
 Go to `http://localhost/p/YOUR_USERNAME/hello`
 
-The page loads in an iframe. The SDK auto-initializes, receives your keypair from the parent page via `postMessage`, and signs every storage request directly to your agent machine.
+The page loads in an iframe. The SDK auto-initializes, receives your keypair from the parent page via `postMessage`, and signs every storage request. Requests are relayed through the WebSocket to your agent.
 
 ### SDK API
 
@@ -175,17 +188,26 @@ docker compose -f docker-compose.prod.yml -f docker-compose.local.yml --profile 
 docker compose -f docker-compose.prod.yml -f docker-compose.local.yml --profile agent down -v
 ```
 
-## Agent Deployment (on agent machines)
+## Agent Setup
 
-The agent runs separately on each machine. Use `docker-compose.agent.yml`:
+The yourbro agent runs as a [ClawdBot (OpenClaw)](https://openclaw.ai) skill. Install it from the ClawdBot skill registry:
+
+1. Set the `YOURBRO_TOKEN` environment variable in ClawdBot to your API token
+2. ClawdBot downloads the `yourbro-agent` binary and manages it automatically
+
+The agent connects outbound via WebSocket — no exposed ports, no DNS, no TLS certificates needed. Works behind NAT/firewalls.
+
+See [`skill/SKILL.md`](skill/SKILL.md) for full setup instructions.
+
+### Standalone Docker (without ClawdBot)
+
+If running the agent outside ClawdBot:
 
 ```bash
-export AGENT_DOMAIN=agent.example.com    # for autocert TLS
-
 docker compose -f docker-compose.agent.yml up -d
 ```
 
-Port 80 for ACME challenges, port 9443 for API. Pair from the dashboard using the code from logs.
+Configure via environment variables: `YOURBRO_TOKEN` and `YOURBRO_SERVER_URL`.
 
 ## Production Deployment (yourbro server)
 
@@ -232,6 +254,11 @@ bash deploy/deploy.sh
 | POST | `/api/keys` | Bearer | Add public key |
 | GET | `/api/keys` | Bearer | List public keys |
 | DELETE | `/api/keys/{id}` | Bearer | Remove public key |
+| POST | `/api/agents` | Bearer | Register agent |
+| GET | `/api/agents` | Bearer | List agents (with online status) |
+| DELETE | `/api/agents/{id}` | Bearer | Remove agent |
+| POST | `/api/relay/{agent_id}` | Bearer | Relay request to agent via WebSocket |
+| GET | `/ws/agent` | Bearer | WebSocket endpoint for agent connection |
 
 ### Agent Data Server
 
@@ -248,10 +275,11 @@ bash deploy/deploy.sh
 
 ```
 api/           Go backend (chi router, pgx, embedded frontend + SDK)
-agent/         Agent data server (Go, SQLite, autocert TLS, RFC 9421 auth)
+agent/         Agent data server (Go, SQLite, relay WebSocket client, RFC 9421 auth)
 web/           Vite + TypeScript SPA (dashboard, login, pairing UI)
-sdk/           ClawdStorage SDK (WebCrypto Ed25519, RFC 9421 signing, IIFE bundle)
+sdk/           ClawdStorage SDK (WebCrypto Ed25519, RFC 9421 signing, relay transport)
 migrations/    PostgreSQL schema migrations
 nginx/         Nginx configs (prod TLS + local dev)
 deploy/        Deployment scripts
+skill/         ClawdBot skill definition (SKILL.md)
 ```
