@@ -1,12 +1,21 @@
 name: Create Skill Release Package
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v1.0.0)'
+        required: true
+        type: string
   push:
     tags:
       - 'v*'
 
 permissions:
   contents: write
+
+env:
+  VERSION: ${{ inputs.version || github.ref_name }}
 
 jobs:
   build-agent:
@@ -53,7 +62,7 @@ jobs:
       - name: Create skill zip
         run: |
           cd skill
-          zip -r ../yourbro-skill-${{ github.ref_name }}.zip \
+          zip -r ../yourbro-skill-${{ env.VERSION }}.zip \
             SKILL.md \
             scripts/ \
             contrib/
@@ -61,7 +70,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: yourbro-skill
-          path: yourbro-skill-${{ github.ref_name }}.zip
+          path: yourbro-skill-${{ env.VERSION }}.zip
 
   release:
     name: Create GitHub Release
