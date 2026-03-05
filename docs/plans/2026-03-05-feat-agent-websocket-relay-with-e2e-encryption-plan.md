@@ -29,9 +29,9 @@ deepened: 2026-03-05
 
 ### Pre-requisites Discovered
 
-- Fix XSS vulnerability in `web/src/pages/dashboard.ts` (innerHTML injection)
-- Fix TOCTOU race in `web/src/lib/crypto.ts` `getOrCreateKeypair()` across tabs
-- Fix SSE connection leak in `web/src/pages/dashboard.ts` (no cleanup on re-render)
+- ~~Fix XSS vulnerability in `web/src/pages/dashboard.ts` (innerHTML injection)~~ DONE
+- ~~Fix TOCTOU race in `web/src/lib/crypto.ts` `getOrCreateKeypair()` across tabs~~ DONE
+- ~~Fix SSE connection leak in `web/src/pages/dashboard.ts` (no cleanup on re-render)~~ DONE
 
 ---
 
@@ -572,7 +572,7 @@ Two env vars instead of five. No domain, no port, no TLS.
 
 ### Security Requirements
 
-- [ ] XSS in dashboard.ts fixed before E2E ships (Phase 0.1)
+- [x] XSS in dashboard.ts fixed before E2E ships (Phase 0.1)
 - [ ] Server cannot read E2E encrypted payloads
 - [ ] Server cannot forge RFC 9421 signatures
 - [ ] X25519 keypairs generated separately (not derived from Ed25519)

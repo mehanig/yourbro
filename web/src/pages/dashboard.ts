@@ -15,6 +15,19 @@ import {
 } from "../lib/api";
 import { getOrCreateKeypair, base64RawUrlEncode, signedFetch } from "../lib/crypto";
 
+/** Active SSE connection — closed before re-render to prevent leaks. */
+let activeSSE: EventSource | null = null;
+
+/** Escape HTML entities to prevent XSS when interpolating user-controlled data. */
+function esc(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function renderAgentsList(agents: Agent[], container: HTMLElement) {
   const listEl = container.querySelector("#agents-list");
   if (!listEl) return;
@@ -25,7 +38,7 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
     const unpairedRelay = agents.filter(a => !a.endpoint && a.is_online);
     relaySelect.innerHTML = unpairedRelay.length === 0
       ? '<option value="">No relay agents online</option>'
-      : unpairedRelay.map(a => `<option value="${a.id}">${a.name || "unnamed"} (#${a.id})</option>`).join("");
+      : unpairedRelay.map(a => `<option value="${a.id}">${esc(a.name || "unnamed")} (#${a.id})</option>`).join("");
   }
 
   listEl.innerHTML =
@@ -37,17 +50,17 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
               const isRelay = !a.endpoint;
               const modeLabel = isRelay
                 ? '<span style="color:#58a6ff;font-size:0.75rem;padding:0.1rem 0.4rem;background:#0d2a4a;border-radius:4px;margin-left:0.5rem;">relay</span>'
-                : `<span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">${a.endpoint}</span>`;
+                : `<span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">${esc(a.endpoint || "")}</span>`;
               return `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
             <div style="display:flex;align-items:center;gap:0.75rem;">
               <span style="color:${a.is_online ? "#3fb950" : "#656d76"};font-size:1.2rem;">${a.is_online ? "●" : "○"}</span>
               <div>
-                <span style="font-weight:600;">${a.name || "unnamed"}</span>
+                <span style="font-weight:600;">${esc(a.name || "unnamed")}</span>
                 ${modeLabel}
               </div>
             </div>
-            <button class="delete-agent" data-id="${a.id}" data-endpoint="${a.endpoint || ""}" data-relay="${isRelay}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Remove</button>
+            <button class="delete-agent" data-id="${a.id}" data-endpoint="${esc(a.endpoint || "")}" data-relay="${isRelay}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Remove</button>
           </div>
         `;
             }
@@ -120,6 +133,12 @@ function renderAgentsList(agents: Agent[], container: HTMLElement) {
 }
 
 export async function renderDashboard(container: HTMLElement) {
+  // Close previous SSE connection to prevent leaks on re-render
+  if (activeSSE) {
+    activeSSE.close();
+    activeSSE = null;
+  }
+
   container.innerHTML = `<p style="color:#8b949e;">Loading...</p>`;
 
   let user: User;
@@ -140,7 +159,7 @@ export async function renderDashboard(container: HTMLElement) {
     <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;padding-bottom:1rem;border-bottom:1px solid #30363d;">
       <h1 style="font-size:1.5rem;font-weight:700;">yourbro</h1>
       <div style="display:flex;align-items:center;gap:1rem;">
-        <span style="color:#8b949e;">${user.email}</span>
+        <span style="color:#8b949e;">${esc(user.email)}</span>
         <a href="#/how-to-use" style="color:#58a6ff;text-decoration:none;font-size:0.9rem;">How to Use</a>
         <button id="logout-btn" style="padding:0.4rem 0.8rem;background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:6px;cursor:pointer;">Logout</button>
       </div>
@@ -185,8 +204,8 @@ export async function renderDashboard(container: HTMLElement) {
                   (p: Page) => `
                 <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
                   <div>
-                    <a href="/p/${user.username}/${p.slug}" target="_blank" style="color:#58a6ff;text-decoration:none;font-weight:600;">${p.title || p.slug}</a>
-                    <span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">/${user.username}/${p.slug}</span>
+                    <a href="/p/${esc(user.username)}/${esc(p.slug)}" target="_blank" style="color:#58a6ff;text-decoration:none;font-weight:600;">${esc(p.title || p.slug)}</a>
+                    <span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">/${esc(user.username)}/${esc(p.slug)}</span>
                   </div>
                   <button class="delete-page" data-id="${p.id}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Delete</button>
                 </div>
@@ -205,8 +224,8 @@ export async function renderDashboard(container: HTMLElement) {
             (t: Token) => `
             <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
               <div>
-                <span style="font-weight:600;">${t.name}</span>
-                <span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">${t.scopes.join(", ")}</span>
+                <span style="font-weight:600;">${esc(t.name)}</span>
+                <span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">${esc(t.scopes.join(", "))}</span>
               </div>
               <button class="delete-token" data-id="${t.id}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Revoke</button>
             </div>
@@ -223,7 +242,8 @@ export async function renderDashboard(container: HTMLElement) {
   `;
 
   // SSE for real-time agent status (cookie-based auth, no token in URL)
-  const evtSource = new EventSource("/api/agents/stream");
+  activeSSE = new EventSource("/api/agents/stream");
+  const evtSource = activeSSE;
   evtSource.onmessage = (event) => {
     try {
       const agents: Agent[] = JSON.parse(event.data);
@@ -233,6 +253,7 @@ export async function renderDashboard(container: HTMLElement) {
   evtSource.onerror = () => {
     // On error, close and fall back to static list
     evtSource.close();
+    activeSSE = null;
     // Load once as fallback
     import("../lib/api").then(({ listAgents }) => {
       listAgents().then((agents) => renderAgentsList(agents || [], container));
@@ -242,6 +263,7 @@ export async function renderDashboard(container: HTMLElement) {
   // Close SSE when navigating away
   const cleanup = () => {
     evtSource.close();
+    activeSSE = null;
     window.removeEventListener("hashchange", cleanup);
   };
   window.addEventListener("hashchange", cleanup);
@@ -249,6 +271,7 @@ export async function renderDashboard(container: HTMLElement) {
   // Event handlers
   document.getElementById("logout-btn")?.addEventListener("click", async () => {
     evtSource.close();
+    activeSSE = null;
     await fetch("/api/logout", { method: "POST" });
     clearToken();
     window.location.hash = "#/login";

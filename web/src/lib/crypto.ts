@@ -25,45 +25,30 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-async function loadFromIndexedDB(): Promise<StoredKeypair | null> {
-  try {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readonly");
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.get(KEY_ID);
-      req.onsuccess = () => resolve(req.result as StoredKeypair | null);
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function saveToIndexedDB(
-  privateKey: CryptoKey,
-  publicKeyBytes: Uint8Array
-): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    store.put({ privateKey, publicKeyBytes }, KEY_ID);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
 /**
  * Get or create an Ed25519 keypair.
  * WebCrypto `extractable` flag applies to BOTH keys in the pair, so we
  * generate extractable, export the public key, then re-import the private
  * key as non-extractable.
+ *
+ * Uses a single readwrite transaction to check-then-create atomically,
+ * preventing a TOCTOU race across browser tabs where two tabs could both
+ * read "no keypair" and generate different keypairs.
  */
 export async function getOrCreateKeypair(): Promise<StoredKeypair> {
-  const cached = await loadFromIndexedDB();
-  if (cached) return cached;
+  const db = await openDB();
 
+  // Attempt atomic read inside a readwrite transaction to hold the lock
+  const existing = await new Promise<StoredKeypair | null>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.get(KEY_ID);
+    req.onsuccess = () => resolve(req.result as StoredKeypair | null);
+    req.onerror = () => reject(req.error);
+  });
+  if (existing) return existing;
+
+  // No keypair exists — generate one
   const temp = (await crypto.subtle.generateKey("Ed25519", true, [
     "sign",
     "verify",
@@ -83,8 +68,24 @@ export async function getOrCreateKeypair(): Promise<StoredKeypair> {
 
   new Uint8Array(privPkcs8).fill(0);
 
-  await saveToIndexedDB(privateKey, publicKeyBytes);
-  return { privateKey, publicKeyBytes };
+  // Re-check and save in a single readwrite transaction (double-check pattern)
+  return new Promise<StoredKeypair>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const checkReq = store.get(KEY_ID);
+    checkReq.onsuccess = () => {
+      if (checkReq.result) {
+        // Another tab won the race — use their keypair
+        resolve(checkReq.result as StoredKeypair);
+        return;
+      }
+      // We won — store ours
+      store.put({ privateKey, publicKeyBytes }, KEY_ID);
+    };
+    checkReq.onerror = () => reject(checkReq.error);
+    tx.oncomplete = () => resolve({ privateKey, publicKeyBytes });
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 /** Base64url-encode without padding (RFC 4648 §5). */
