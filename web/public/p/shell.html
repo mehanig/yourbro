@@ -1,80 +1,9 @@
-package handlers
-
-import (
-	"encoding/json"
-	"html/template"
-	"net/http"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/mehanig/yourbro/api/internal/relay"
-	"github.com/mehanig/yourbro/api/internal/storage"
-)
-
-type PagesHandler struct {
-	DB        *storage.DB
-	Hub       *relay.Hub
-	SDKScript string // inline SDK JavaScript (set at startup)
-}
-
-// RenderPage serves a published page at /p/:username/:slug.
-// The server is a pure relay — it never stores or sees page HTML.
-// Page content is fetched on-demand from the agent via WebSocket relay.
-func (h *PagesHandler) RenderPage(w http.ResponseWriter, r *http.Request) {
-	username := chi.URLParam(r, "username")
-	slug := chi.URLParam(r, "slug")
-
-	user, err := h.DB.GetUserByUsername(r.Context(), username)
-	if err != nil {
-		http.Error(w, "User not found", http.StatusNotFound)
-		return
-	}
-
-	// Find all agents for this user (routing without pages table)
-	agents, err := h.DB.ListAgents(r.Context(), user.ID)
-	if err != nil || len(agents) == 0 {
-		http.Error(w, "No agents registered", http.StatusNotFound)
-		return
-	}
-
-	// Collect agent IDs and check which are online
-	type agentInfo struct {
-		ID     int64
-		Online bool
-	}
-	var agentInfos []agentInfo
-	for _, a := range agents {
-		agentInfos = append(agentInfos, agentInfo{
-			ID:     a.ID,
-			Online: h.Hub.IsOnline(a.ID),
-		})
-	}
-
-	// Build agent ID list for JS
-	var agentIDs []int64
-	for _, ai := range agentInfos {
-		agentIDs = append(agentIDs, ai.ID)
-	}
-
-	// JSON-encode the SDK script for safe injection into JS
-	sdkJSON, _ := json.Marshal(h.SDKScript)
-
-	tmpl := template.Must(template.New("page").Parse(pageHostTemplate))
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl.Execute(w, map[string]any{
-		"Username":      username,
-		"Slug":          slug,
-		"AgentIDs":      agentIDs,
-		"SDKScriptJSON": template.JS(string(sdkJSON)),
-	})
-}
-
-
-const pageHostTemplate = `<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{.Slug}} — yourbro</title>
+    <title>yourbro</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #fafafa; }
@@ -92,19 +21,40 @@ const pageHostTemplate = `<!DOCTYPE html>
 <body>
     <script>
         (async function() {
-            var agentIds = [{{range $i, $id := .AgentIDs}}{{if $i}},{{end}}{{$id}}{{end}}];
-            var slug = "{{.Slug}}";
-            var sdkScript = {{.SDKScriptJSON}};
+            var API = 'https://api.yourbro.ai';
+
+            // Parse username and slug from /p/{username}/{slug}
+            var parts = window.location.pathname.split('/').filter(Boolean);
+            if (parts.length < 3 || parts[0] !== 'p') {
+                document.body.innerHTML = '<div class="status-msg">Invalid page URL.</div>';
+                return;
+            }
+            var username = decodeURIComponent(parts[1]);
+            var slug = decodeURIComponent(parts[2]);
+
+            document.title = slug + ' \u2014 yourbro';
 
             // 1. Verify auth — get content token for iframe SDK relay auth
-            var tokenResp = await fetch('/api/content-token', { credentials: 'include' });
+            var tokenResp = await fetch(API + '/api/content-token', { credentials: 'include' });
             if (!tokenResp.ok) {
                 document.body.innerHTML = '<div class="status-msg">Sign in to view this page. <a href="/">Go to login</a></div>';
                 return;
             }
             var token = (await tokenResp.json()).token;
 
-            // 2. Load keypairs from IndexedDB (stored by dashboard pairing flow)
+            // 2. Get agent IDs from API
+            var agentsResp = await fetch(API + '/api/page-agents/' + encodeURIComponent(username), { credentials: 'include' });
+            if (!agentsResp.ok) {
+                document.body.innerHTML = '<div class="status-msg">User not found. <a href="/">Go home</a></div>';
+                return;
+            }
+            var agentIds = (await agentsResp.json()).agent_ids;
+            if (!agentIds || agentIds.length === 0) {
+                document.body.innerHTML = '<div class="status-msg">No agents registered. <a href="/">Go home</a></div>';
+                return;
+            }
+
+            // 3. Load keypairs from IndexedDB (stored by dashboard pairing flow)
             var kp = null;
             var x25519kp = null;
             var agentX25519Keys = {};
@@ -151,13 +101,17 @@ const pageHostTemplate = `<!DOCTYPE html>
                 return;
             }
 
-            // 3. Fetch page HTML from agent via relay (try each agent)
+            // 4. Load SDK script from R2
+            var sdkResp = await fetch('/sdk/clawd-storage.js');
+            var sdkScript = sdkResp.ok ? await sdkResp.text() : '';
+
+            // 5. Fetch page HTML from agent via relay (try each agent)
             var pageHTML = null;
             var pageTitle = null;
             var usedAgentId = null;
             for (var i = 0; i < agentIds.length; i++) {
                 try {
-                    var resp = await fetch('/api/relay/' + agentIds[i], {
+                    var resp = await fetch(API + '/api/relay/' + agentIds[i], {
                         method: 'POST',
                         credentials: 'include',
                         headers: { 'Content-Type': 'application/json' },
@@ -190,20 +144,19 @@ const pageHostTemplate = `<!DOCTYPE html>
             }
 
             // Update page title
-            document.title = pageTitle + ' — yourbro';
+            document.title = pageTitle + ' \u2014 yourbro';
 
-            // 4. Build enriched HTML with SDK + meta tags
-            var apiBase = window.location.origin;
+            // 6. Build enriched HTML with SDK + meta tags
             var metaTags =
                 '<meta name="clawd-relay-mode" content="true">\n' +
                 '<meta name="clawd-agent-id" content="' + usedAgentId + '">\n' +
                 '<meta name="clawd-page-slug" content="' + slug + '">\n' +
-                '<meta name="clawd-api-base" content="' + apiBase + '">\n' +
+                '<meta name="clawd-api-base" content="' + API + '">\n' +
                 '<meta name="clawd-session-token" content="' + token + '">\n' +
                 '<script>' + sdkScript + '<\/script>\n';
             var enrichedHTML = metaTags + pageHTML;
 
-            // 5. Create sandboxed iframe with srcdoc
+            // 7. Create sandboxed iframe with srcdoc
             var container = document.createElement('div');
             container.className = 'frame-container';
             var iframe = document.createElement('iframe');
@@ -212,7 +165,7 @@ const pageHostTemplate = `<!DOCTYPE html>
             container.appendChild(iframe);
             document.body.appendChild(container);
 
-            // 6. Send keypairs to sandboxed iframe via postMessage
+            // 8. Send keypairs to sandboxed iframe via postMessage
             iframe.addEventListener('load', function() {
                 var msg = {
                     type: 'clawd-keypair',
@@ -231,39 +184,4 @@ const pageHostTemplate = `<!DOCTYPE html>
         })();
     </script>
 </body>
-</html>`
-
-// PageAgents returns agent IDs for a given username.
-// Used by the static page shell to discover agents without server-side rendering.
-func (h *PagesHandler) PageAgents(w http.ResponseWriter, r *http.Request) {
-	username := chi.URLParam(r, "username")
-
-	user, err := h.DB.GetUserByUsername(r.Context(), username)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
-		return
-	}
-
-	agents, err := h.DB.ListAgents(r.Context(), user.ID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list agents"})
-		return
-	}
-
-	var ids []int64
-	for _, a := range agents {
-		ids = append(ids, a.ID)
-	}
-	if ids == nil {
-		ids = []int64{}
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"agent_ids": ids})
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}
-
+</html>

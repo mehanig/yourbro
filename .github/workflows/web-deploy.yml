@@ -24,6 +24,9 @@ jobs:
       - name: Build SDK
         run: cd sdk && npm install --ignore-scripts && npm rebuild esbuild && npm run build
 
+      - name: Copy SDK to web public
+        run: mkdir -p web/public/sdk && cp sdk/dist/clawd-storage.js web/public/sdk/clawd-storage.js
+
       - name: Build Frontend
         run: cd web && npm ci && npm run build
         env:
@@ -73,6 +76,18 @@ jobs:
                   }
                 },
                 {
+                  "expression": "(http.host eq \"yourbro.ai\" and starts_with(http.request.uri.path, \"/p/\"))",
+                  "description": "Page shell for /p/* routes",
+                  "action": "rewrite",
+                  "action_parameters": {
+                    "uri": {
+                      "path": {
+                        "value": "/${{ env.BUILD_PATH }}/p/shell.html"
+                      }
+                    }
+                  }
+                },
+                {
                   "expression": "(http.host eq \"yourbro.ai\" and not starts_with(http.request.uri.path, \"/assets/\") and not starts_with(http.request.uri.path, \"/p/\") and not ends_with(http.request.uri.path, \".png\") and not ends_with(http.request.uri.path, \".svg\") and not ends_with(http.request.uri.path, \".ico\") and not ends_with(http.request.uri.path, \".jpg\") and not ends_with(http.request.uri.path, \".jpeg\") and not ends_with(http.request.uri.path, \".gif\") and not ends_with(http.request.uri.path, \".webp\") and not ends_with(http.request.uri.path, \".webmanifest\") and not ends_with(http.request.uri.path, \".xml\") and not ends_with(http.request.uri.path, \".js\") and not ends_with(http.request.uri.path, \".css\"))",
                   "description": "SPA Routing (exclude /p/ pages)",
                   "action": "rewrite",
@@ -96,30 +111,6 @@ jobs:
             -H "Authorization: Bearer ${CF_API_TOKEN}" \
             -H "Content-Type: application/json" \
             --data '{"rules": []}'
-
-      - name: Update Cloudflare Origin Rules
-        env:
-          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
-        run: |
-          curl -sf -X PUT "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/rulesets/phases/http_request_origin/entrypoint" \
-            -H "Authorization: Bearer ${CF_API_TOKEN}" \
-            -H "Content-Type: application/json" \
-            --data '{
-              "rules": [
-                {
-                  "expression": "(http.host eq \"yourbro.ai\" and starts_with(http.request.uri.path, \"/p/\"))",
-                  "description": "Route /p/ pages to API server",
-                  "action": "route",
-                  "action_parameters": {
-                    "origin": {
-                      "host": "api.yourbro.ai",
-                      "port": 443
-                    }
-                  }
-                }
-              ]
-            }'
 
       - name: Purge Cloudflare cache
         env:

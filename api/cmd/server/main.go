@@ -376,8 +376,8 @@ func main() {
 			json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 		})
 
-		// Pages — removed. Pages are now stored on the agent and fetched via relay.
-		// The /p/{username}/{slug} shell handles all page rendering.
+		// Page agents — returns agent IDs for a username (used by static page shell)
+		r.Get("/page-agents/{username}", pagesHandler.PageAgents)
 
 		// Agents
 		r.Route("/agents", func(r chi.Router) {
