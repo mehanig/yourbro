@@ -76,6 +76,17 @@ jobs:
             # Login to Azure Container Registry
             echo "${{ secrets.AZ_REGISTRY_PASSWORD }}" | docker login mehanig.azurecr.io -u mehanig --password-stdin
 
+            # Generate self-signed SSL cert if no cert exists (Cloudflare terminates public SSL)
+            CERT_DIR="/opt/yourbro/ssl"
+            if [ ! -f "$CERT_DIR/fullchain.pem" ]; then
+              echo "==> Generating self-signed SSL certificate for Cloudflare origin"
+              mkdir -p "$CERT_DIR"
+              openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+                -keyout "$CERT_DIR/privkey.pem" \
+                -out "$CERT_DIR/fullchain.pem" \
+                -subj "/CN=yourbro.ai"
+            fi
+
             # Generate .env if first deploy
             if [ ! -f /opt/yourbro/.env ]; then
               echo "==> Generating .env with random secrets"
