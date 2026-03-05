@@ -170,7 +170,7 @@ func main() {
 			Value:    state,
 			Path:     "/auth/google/callback",
 			HttpOnly: true,
-			Secure:   true,
+			Secure:   getEnv("COOKIE_DOMAIN", "") != "",
 			SameSite: http.SameSiteLaxMode,
 			MaxAge:   300, // 5 minutes
 		})
@@ -427,10 +427,10 @@ func sessionCookie(value string, maxAge int) *http.Cookie {
 	return &http.Cookie{
 		Name:     "yb_session",
 		Value:    value,
-		Domain:   getEnv("COOKIE_DOMAIN", ""), // ".yourbro.ai" in prod, empty for local
+		Domain:   getEnv("COOKIE_DOMAIN", ""), // "yourbro.ai" in prod, empty for local
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   getEnv("COOKIE_DOMAIN", "") != "", // Secure only when cross-subdomain (production)
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   maxAge,
 	}
