@@ -3,11 +3,10 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log"
-	"math/big"
 	"net/http"
+	"math/big"
 	"os"
 	"os/signal"
 	"strings"
@@ -39,14 +38,6 @@ func main() {
 		log.Fatalf("Failed to create pages directory: %v", err)
 	}
 
-	// Ensure internal API key exists
-	const internalKeyPath = "/data/yourbro/internal.key"
-	internalKey, err := ensureInternalKey(internalKeyPath)
-	if err != nil {
-		log.Fatalf("Failed to set up internal key: %v", err)
-	}
-	log.Printf("Internal API key at: %s", internalKeyPath)
-
 	// Generate pairing code on startup (8 chars, alphanumeric, 5-min expiry)
 	pairingCode := generatePairingCode(8)
 	pairingExpiry := time.Now().Add(5 * time.Minute)
@@ -54,8 +45,7 @@ func main() {
 	log.Printf("=== PAIRING CODE: %s (expires in 5 minutes) ===", pairingCode)
 
 	storageHandler := &handlers.StorageHandler{DB: db}
-	pagesHandler := &handlers.PagesHandler{DB: db}
-	internalHandler := &handlers.InternalHandler{DB: db}
+	pagesHandler := &handlers.PagesHandler{PagesDir: pagesDir}
 	pairHandler := &handlers.PairHandler{
 		DB:            db,
 		PairingCode:   pairingCode,
@@ -144,27 +134,12 @@ func main() {
 		Handler:   router.HandleRequest,
 	}
 
-	// Internal API — separate server on localhost:8081, NOT exposed via relay
-	internalMux := chi.NewRouter()
-	internalMux.Use(mw.RequireInternalKey(internalKey))
-	internalMux.Put("/page/{slug}", internalHandler.Register)
-	internalMux.Delete("/page/{slug}", internalHandler.Delete)
-
-	internalSrv := &http.Server{Addr: "127.0.0.1:19200", Handler: internalMux}
-	go func() {
-		log.Printf("Internal API listening on 127.0.0.1:19200")
-		if err := internalSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Internal server failed: %v", err)
-		}
-	}()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		log.Println("Shutting down...")
-		internalSrv.Shutdown(ctx)
 		cancel()
 	}()
 
@@ -176,23 +151,6 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-func ensureInternalKey(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err == nil {
-		return strings.TrimSpace(string(data)), nil
-	}
-	// Generate new 32-byte random key
-	keyBytes := make([]byte, 32)
-	if _, err := rand.Read(keyBytes); err != nil {
-		return "", fmt.Errorf("generate random key: %w", err)
-	}
-	key := hex.EncodeToString(keyBytes)
-	if err := os.WriteFile(path, []byte(key+"\n"), 0600); err != nil {
-		return "", fmt.Errorf("write key file: %w", err)
-	}
-	return key, nil
 }
 
 const pairingChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"

@@ -34,6 +34,17 @@
 
             document.title = slug + ' \u2014 yourbro';
 
+            // Register Service Worker for asset serving
+            var swReady = null;
+            if ('serviceWorker' in navigator) {
+                try {
+                    await navigator.serviceWorker.register('/p/page-sw.js', { scope: '/p/' });
+                    swReady = navigator.serviceWorker.ready;
+                } catch(e) {
+                    console.warn('SW registration failed:', e);
+                }
+            }
+
             // 1. Verify auth — get content token for iframe SDK relay auth
             var tokenResp = await fetch(API + '/api/content-token', { credentials: 'include' });
             if (!tokenResp.ok) {
@@ -105,9 +116,8 @@
             var sdkResp = await fetch('/sdk/clawd-storage.js');
             var sdkScript = sdkResp.ok ? await sdkResp.text() : '';
 
-            // 5. Fetch page HTML from agent via relay (try each agent)
-            var pageHTML = null;
-            var pageTitle = null;
+            // 5. Fetch page bundle from agent via relay (try each agent)
+            var pageData = null;
             var usedAgentId = null;
             for (var i = 0; i < agentIds.length; i++) {
                 try {
@@ -124,9 +134,7 @@
                     if (resp.ok) {
                         var envelope = await resp.json();
                         if (envelope.status === 200 && envelope.body) {
-                            var pageData = JSON.parse(envelope.body);
-                            pageHTML = pageData.html_content;
-                            pageTitle = pageData.title || slug;
+                            pageData = JSON.parse(envelope.body);
                             usedAgentId = agentIds[i];
                             break;
                         }
@@ -134,7 +142,7 @@
                 } catch(e) {}
             }
 
-            if (!pageHTML) {
+            if (!pageData || !pageData.files || !pageData.files['index.html']) {
                 document.body.innerHTML = '<div class="status-msg">' +
                     'Your agent is currently offline.' +
                     '<div class="subtitle">Start your agent to view this page.</div>' +
@@ -143,11 +151,34 @@
                 return;
             }
 
-            // Update page title
+            var pageTitle = pageData.title || slug;
             document.title = pageTitle + ' \u2014 yourbro';
 
-            // 6. Build enriched HTML with SDK + meta tags
+            // 6. Send file bundle to Service Worker for caching
+            if (swReady) {
+                try {
+                    var reg = await swReady;
+                    var sw = reg.active;
+                    if (sw) {
+                        await new Promise(function(resolve) {
+                            var channel = new MessageChannel();
+                            channel.port1.onmessage = function() { resolve(); };
+                            sw.postMessage({
+                                type: 'cache-page',
+                                slug: slug,
+                                files: pageData.files
+                            }, [channel.port2]);
+                        });
+                    }
+                } catch(e) {
+                    console.warn('SW caching failed:', e);
+                }
+            }
+
+            // 7. Build enriched HTML with SDK + meta tags + base href
+            var pageHTML = pageData.files['index.html'];
             var metaTags =
+                '<base href="/p/assets/' + slug + '/">\n' +
                 '<meta name="clawd-relay-mode" content="true">\n' +
                 '<meta name="clawd-agent-id" content="' + usedAgentId + '">\n' +
                 '<meta name="clawd-page-slug" content="' + slug + '">\n' +
@@ -156,16 +187,16 @@
                 '<script>' + sdkScript + '<\/script>\n';
             var enrichedHTML = metaTags + pageHTML;
 
-            // 7. Create sandboxed iframe with srcdoc
+            // 8. Create sandboxed iframe with srcdoc
             var container = document.createElement('div');
             container.className = 'frame-container';
             var iframe = document.createElement('iframe');
             iframe.srcdoc = enrichedHTML;
-            iframe.setAttribute('sandbox', 'allow-scripts');
+            iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
             container.appendChild(iframe);
             document.body.appendChild(container);
 
-            // 8. Send keypairs to sandboxed iframe via postMessage
+            // 9. Send keypairs to sandboxed iframe via postMessage
             iframe.addEventListener('load', function() {
                 var msg = {
                     type: 'clawd-keypair',

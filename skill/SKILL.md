@@ -35,15 +35,15 @@ metadata:
 
 # yourbro — Publish AI-Powered Pages
 
-Publish thin HTML pages to yourbro.ai with zero-trust, agent-backed storage. Your ClawdBot publishes pages to your agent (which stores them locally), and yourbro.ai renders them by fetching content from your agent on demand. yourbro servers never store your data.
+Publish multi-file web pages to yourbro.ai with zero-trust, agent-backed storage. Your ClawdBot writes page directories to your agent (which stores them locally), and yourbro.ai renders them by fetching content from your agent on demand. yourbro servers never store your data.
 
 ## How It Works
 
 ```
-ClawdBot writes HTML file to /data/yourbro/pages/{slug}.html -> registers via internal API -> visitor loads page -> yourbro.ai fetches HTML from your agent (read from disk) -> SDK in page fetches data from your agent -> displayed in browser
+ClawdBot writes files to /data/yourbro/pages/{slug}/ -> page is live immediately -> visitor loads page -> yourbro.ai fetches file bundle from your agent -> Service Worker caches assets -> rendered in sandboxed iframe
 ```
 
-Your agent (yourbro-agent) runs on your machine and serves pages from local files. yourbro.ai is a pure relay — it never stores, sees, or serves your content. Pages only work when your agent is online. Editing the HTML file on disk takes effect immediately — no re-registration needed.
+Your agent (yourbro-agent) runs on your machine and serves pages from local directories. yourbro.ai is a pure relay — it never stores, sees, or serves your content. Pages only work when your agent is online. Editing files on disk takes effect immediately.
 
 The agent connects to yourbro.ai via an outbound WebSocket — no exposed ports, no DNS, no TLS certificates needed.
 
@@ -96,14 +96,14 @@ Go to your yourbro.ai dashboard. Your agent appears in the "Paired Agents" list 
 
 ### 4. Publish pages
 
-Ask your ClawdBot to publish a page. It will use this skill to:
+Ask your ClawdBot to publish a page. It will:
 
-1. Generate HTML content
-2. Write the file to `/data/yourbro/pages/{slug}.html`
-3. Register via internal API: `curl -X PUT localhost:19200/page/{slug} -H "X-YourBro-Internal-Key: $(cat /data/yourbro/internal.key)" -d '{"title":"..."}'`
+1. Create the page directory: `mkdir -p /data/yourbro/pages/{slug}/`
+2. Write `index.html` (required) and any other files (JS, CSS, etc.)
+3. Optionally write `page.json` with `{"title": "My Page"}` for a custom title
 4. The page goes live at `https://yourbro.ai/p/USERNAME/SLUG`
 
-To update a page, just edit the HTML file — changes are live immediately (no API call needed). Pages are served on-demand from your agent. If the agent is offline, visitors see an "agent offline" message.
+To update a page, just edit the files — changes are live immediately. To delete a page, remove the directory. No API calls needed.
 
 ## Configuration
 
@@ -112,9 +112,8 @@ To update a page, just edit the HTML file — changes are live immediately (no A
 | `YOURBRO_TOKEN` | Yes | -- | API token from yourbro.ai dashboard (used by both ClawdBot and the agent) |
 | `YOURBRO_SERVER_URL` | Yes | -- | yourbro server URL (e.g., `https://yourbro.ai`) |
 | `SQLITE_PATH` | No | `~/.yourbro/agent.db` | SQLite database path |
-| `YOURBRO_INTERNAL_KEY` | No | Auto-generated | Internal API key, auto-generated at `/data/yourbro/internal.key` |
 
-Two env vars (`YOURBRO_TOKEN` + `YOURBRO_SERVER_URL`) are all you need. The internal API key is auto-generated on first startup.
+Two env vars (`YOURBRO_TOKEN` + `YOURBRO_SERVER_URL`) are all you need.
 
 ## Usage
 
@@ -129,48 +128,82 @@ When the user asks you to publish a page or create a web page on yourbro:
    ```
    Use the first online agent's `id`.
 
-3. **Generate HTML**: Create the HTML/JS/CSS content. If the page needs persistent data, use the ClawdStorage SDK:
+3. **Generate content**: Create HTML/JS/CSS files. Pages are directory-based — each page is a folder with `index.html` plus any assets. If the page needs persistent data, use the ClawdStorage SDK:
    ```javascript
    const storage = await ClawdStorage.init();
    const data = await storage.get("my-key");
    await storage.set("counter", 42);
    ```
 
-4. **Write the HTML file** to `/data/yourbro/pages/{slug}.html`:
+4. **Write the page directory**:
    ```bash
-   cat > /data/yourbro/pages/my-page.html << 'EOF'
-   <!DOCTYPE html><html><body><h1>My Page</h1></body></html>
+   mkdir -p /data/yourbro/pages/my-page/
+
+   cat > /data/yourbro/pages/my-page/index.html << 'EOF'
+   <!DOCTYPE html>
+   <html>
+   <head>
+       <link rel="stylesheet" href="style.css">
+   </head>
+   <body>
+       <h1>My Page</h1>
+       <script src="app.js"></script>
+   </body>
+   </html>
    EOF
+
+   cat > /data/yourbro/pages/my-page/style.css << 'EOF'
+   body { background: #0a0a0a; color: #fafafa; }
+   EOF
+
+   cat > /data/yourbro/pages/my-page/app.js << 'EOF'
+   console.log('Hello from yourbro!');
+   EOF
+
+   # Optional: set a custom title
+   echo '{"title": "My Page"}' > /data/yourbro/pages/my-page/page.json
    ```
 
-5. **Register the page** via internal API:
-   ```bash
-   curl -X PUT localhost:19200/page/my-page \
-     -H "X-YourBro-Internal-Key: $(cat /data/yourbro/internal.key)" \
-     -H "Content-Type: application/json" \
-     -d '{"title": "My Page"}'
-   ```
-
-6. **Share the URL**: `https://yourbro.ai/p/USERNAME/SLUG`
+5. **Share the URL**: `https://yourbro.ai/p/USERNAME/my-page`
 
 ## Examples
 
 ### Simple static page
 
 ```bash
-# Write the HTML file
-cat > /data/yourbro/pages/hello.html << 'EOF'
+mkdir -p /data/yourbro/pages/hello/
+cat > /data/yourbro/pages/hello/index.html << 'EOF'
 <!DOCTYPE html><html><body><h1>Hello from yourbro!</h1></body></html>
 EOF
-
-# Register it
-curl -X PUT localhost:19200/page/hello \
-  -H "X-YourBro-Internal-Key: $(cat /data/yourbro/internal.key)" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Hello World"}'
+echo '{"title": "Hello World"}' > /data/yourbro/pages/hello/page.json
 ```
 
 Page is live at: `https://yourbro.ai/p/USERNAME/hello`
+
+### Multi-file page with JS and CSS
+
+```bash
+mkdir -p /data/yourbro/pages/dashboard/
+
+cat > /data/yourbro/pages/dashboard/index.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head><link rel="stylesheet" href="style.css"></head>
+<body><div id="app"></div><script src="app.js"></script></body>
+</html>
+EOF
+
+cat > /data/yourbro/pages/dashboard/style.css << 'EOF'
+body { margin: 0; background: #111; color: #eee; font-family: system-ui; }
+#app { padding: 20px; }
+EOF
+
+cat > /data/yourbro/pages/dashboard/app.js << 'EOF'
+document.getElementById('app').innerHTML = '<h1>Dashboard</h1>';
+EOF
+
+echo '{"title": "Dashboard"}' > /data/yourbro/pages/dashboard/page.json
+```
 
 ### Page with agent-backed storage
 
@@ -194,31 +227,19 @@ await storage.delete("old-key");
 
 ### Update an existing page
 
-Just edit the HTML file — changes are live immediately:
+Just edit the files — changes are live immediately:
 
 ```bash
-cat > /data/yourbro/pages/hello.html << 'EOF'
+cat > /data/yourbro/pages/hello/index.html << 'EOF'
 <!DOCTYPE html><html><body><h1>Updated content!</h1></body></html>
 EOF
-```
-
-No API call needed. To update the title, re-register:
-
-```bash
-curl -X PUT localhost:19200/page/hello \
-  -H "X-YourBro-Internal-Key: $(cat /data/yourbro/internal.key)" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Updated Title"}'
 ```
 
 ### Delete a page
 
 ```bash
-curl -X DELETE localhost:19200/page/hello \
-  -H "X-YourBro-Internal-Key: $(cat /data/yourbro/internal.key)"
+rm -rf /data/yourbro/pages/hello/
 ```
-
-Note: this only unregisters the page. The HTML file remains on disk — delete it manually if needed.
 
 ### List pages (via relay)
 

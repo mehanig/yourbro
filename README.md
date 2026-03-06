@@ -6,19 +6,19 @@ Platform for AI-published web pages with zero-trust agent storage. Your AI agent
 
 There are **two separate systems** working together:
 
-### 1. Page Publishing (ClawdBot → Agent via Internal API)
+### 1. Page Publishing (ClawdBot → Filesystem)
 
-ClawdBot writes HTML files directly to `/data/yourbro/pages/{slug}.html`, then registers them via the agent's internal API. The agent reads files from disk on every request, so edits are live immediately without re-registering.
+ClawdBot writes page directories directly to `/data/yourbro/pages/{slug}/`. Each page is a directory with `index.html` plus any assets (JS, CSS, etc.). No registration API needed — the filesystem IS the database. Edits are live immediately.
 
 ```
 You (human)                     ClawdBot                                           Your Agent
     │                               │                                                   │
     ├── Create API token ──────────>│                                                   │
     │   (dashboard)                 │                                                   │
-    │                               ├── Write /data/yourbro/pages/my-page.html ────────>│ (shared filesystem)
-    │                               ├── PUT localhost:19200/page/my-page ───────>│
-    │                               │   X-YourBro-Internal-Key: <key>                   ├── Store path in SQLite
-    │                               │                                                   │   (your machine)
+    │                               ├── mkdir /data/yourbro/pages/my-page/ ────────────>│ (shared filesystem)
+    │                               ├── Write index.html, app.js, style.css ───────────>│
+    │                               ├── Write page.json (optional title) ──────────────>│
+    │                               │                                                   │
 ```
 
 ### 2. Page Viewing & Data Storage (Browser → Agent via Relay)
@@ -137,29 +137,25 @@ This generates an Ed25519 keypair in your browser and registers it with the agen
 
 ### 6. Publish a Page
 
-Pages are managed via the agent's internal API. ClawdBot writes the HTML file and registers it:
+Pages are directory-based. ClawdBot just writes files — no API calls needed:
 
 ```bash
-# Read the internal API key (auto-generated on first startup)
-KEY=$(cat /data/yourbro/internal.key)
+# Create the page directory
+mkdir -p /data/yourbro/pages/hello/
 
 # Write the HTML file
-cat > /data/yourbro/pages/hello.html << 'EOF'
+cat > /data/yourbro/pages/hello/index.html << 'EOF'
 <html><body><h1>Hello from yourbro!</h1></body></html>
 EOF
 
-# Register the page
-curl -X PUT localhost:19200/page/hello \
-  -H "X-YourBro-Internal-Key: $KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Hello World"}'
+# Optional: set a custom title
+echo '{"title": "Hello World"}' > /data/yourbro/pages/hello/page.json
 ```
 
-The page file lives on your machine. To update content, just edit the file — changes are live immediately. To update the title, re-register. To delete:
+Page files live on your machine. To update, just edit the files — changes are live immediately. To delete:
 
 ```bash
-curl -X DELETE localhost:19200/page/hello \
-  -H "X-YourBro-Internal-Key: $KEY"
+rm -rf /data/yourbro/pages/hello/
 ```
 
 ### 7. Visit Your Page
@@ -287,21 +283,12 @@ All agent endpoints are accessed through `POST /api/relay/{agent_id}`. The relay
 | POST | `/api/pair` | Pairing code | Register browser's public keys (Ed25519 + X25519) |
 | GET | `/api/auth-check` | RFC 9421 sig | Check if browser's key is authorized |
 | DELETE | `/api/keys` | RFC 9421 sig | Revoke browser's signing key |
-| GET | `/api/pages` | — | List all pages |
-| GET | `/api/page/{slug}` | — | Get page content (reads from disk) |
+| GET | `/api/pages` | — | List all pages (scans page directories) |
+| GET | `/api/page/{slug}` | — | Get page file bundle (all files in directory) |
 | GET | `/api/storage/{slug}/{key}` | RFC 9421 sig | Get storage value |
 | PUT | `/api/storage/{slug}/{key}` | RFC 9421 sig | Set storage value |
 | GET | `/api/storage/{slug}?prefix=` | RFC 9421 sig | List storage keys |
 | DELETE | `/api/storage/{slug}/{key}` | RFC 9421 sig | Delete storage value |
-
-### Agent Internal API (localhost only, port 19200)
-
-ClawdBot manages pages via this API. It runs on `127.0.0.1:19200` — not exposed via relay, not accessible from the network. Auth via `X-YourBro-Internal-Key` header (key auto-generated at `/data/yourbro/internal.key`).
-
-| Method | Path | Description |
-|---|---|---|
-| PUT | `/page/{slug}` | Register a page (file must exist at `/data/yourbro/pages/{slug}.html`) |
-| DELETE | `/page/{slug}` | Unregister a page (file remains on disk) |
 
 ## Project Structure
 

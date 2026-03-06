@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -60,27 +59,8 @@ func NewDB(path string) (*DB, error) {
 
 	// Migrations: add columns/tables that may not exist in older databases
 	db.Exec(`ALTER TABLE authorized_keys ADD COLUMN x25519_public_key BLOB`) // ignore error if already exists
-	// Migrate pages table: replace html_content with file_path.
-	// SQLite <3.35 doesn't support DROP COLUMN, so recreate the table.
-	db.Exec(`CREATE TABLE IF NOT EXISTS pages (
-		slug       TEXT PRIMARY KEY,
-		title      TEXT NOT NULL DEFAULT '',
-		file_path  TEXT NOT NULL,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	)`)
-	// If the old table exists with html_content, migrate it
-	var hasHTMLContent int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('pages') WHERE name='html_content'`).Scan(&hasHTMLContent); err == nil && hasHTMLContent > 0 {
-		db.Exec(`CREATE TABLE pages_new (
-			slug       TEXT PRIMARY KEY,
-			title      TEXT NOT NULL DEFAULT '',
-			file_path  TEXT NOT NULL DEFAULT '',
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-		)`)
-		db.Exec(`INSERT INTO pages_new (slug, title, updated_at) SELECT slug, title, updated_at FROM pages`)
-		db.Exec(`DROP TABLE pages`)
-		db.Exec(`ALTER TABLE pages_new RENAME TO pages`)
-	}
+	// Drop legacy pages table — pages are now directory-based on the filesystem
+	db.Exec(`DROP TABLE IF EXISTS pages`)
 
 	d := &DB{db: db, authKeys: make(map[string]string)}
 	if err := d.reloadAuthKeys(); err != nil {
@@ -207,71 +187,6 @@ func (d *DB) List(slug, prefix string) ([]Entry, error) {
 		entries = append(entries, e)
 	}
 	return entries, nil
-}
-
-// --- Pages ---
-
-type Page struct {
-	Slug        string    `json:"slug"`
-	Title       string    `json:"title"`
-	FilePath    string    `json:"-"`
-	HTMLContent string    `json:"html_content"` // populated by reading file from disk
-	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-type PageSummary struct {
-	Slug      string    `json:"slug"`
-	Title     string    `json:"title"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-func (d *DB) GetPage(slug string) (*Page, error) {
-	var p Page
-	err := d.db.QueryRow(
-		`SELECT slug, title, file_path, updated_at FROM pages WHERE slug = ?`, slug,
-	).Scan(&p.Slug, &p.Title, &p.FilePath, &p.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	// Read HTML content from disk
-	content, err := os.ReadFile(p.FilePath)
-	if err != nil {
-		return nil, fmt.Errorf("read page file %s: %w", p.FilePath, err)
-	}
-	p.HTMLContent = string(content)
-	return &p, nil
-}
-
-func (d *DB) UpsertPage(slug, title, filePath string) error {
-	_, err := d.db.Exec(`
-		INSERT INTO pages (slug, title, file_path, updated_at)
-		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-		ON CONFLICT (slug) DO UPDATE SET title = excluded.title, file_path = excluded.file_path, updated_at = CURRENT_TIMESTAMP
-	`, slug, title, filePath)
-	return err
-}
-
-func (d *DB) DeletePage(slug string) error {
-	_, err := d.db.Exec(`DELETE FROM pages WHERE slug = ?`, slug)
-	return err
-}
-
-func (d *DB) ListPages() ([]PageSummary, error) {
-	rows, err := d.db.Query(`SELECT slug, title, updated_at FROM pages ORDER BY updated_at DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var pages []PageSummary
-	for rows.Next() {
-		var p PageSummary
-		if err := rows.Scan(&p.Slug, &p.Title, &p.UpdatedAt); err != nil {
-			return nil, err
-		}
-		pages = append(pages, p)
-	}
-	return pages, nil
 }
 
 // --- Agent Identity (X25519) ---
