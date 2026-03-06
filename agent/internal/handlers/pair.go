@@ -122,11 +122,20 @@ func (h *PairHandler) Pair(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// Regenerate creates a fresh pairing code if the current one is expired or used.
+// IsPaired returns true if the agent has any authorized keys.
+func (h *PairHandler) IsPaired() bool {
+	return len(h.DB.ListAuthorizedKeysWithX25519()) > 0
+}
+
+// Regenerate creates a fresh pairing code if the current one is expired, used, or agent was unpaired.
 // Returns the current (or new) code. Thread-safe.
 func (h *PairHandler) Regenerate(genCode func(int) string) string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	// Reset if keys were revoked (unpaired) so a new code can be used
+	if h.used && len(h.DB.ListAuthorizedKeysWithX25519()) == 0 {
+		h.used = false
+	}
 	if !h.used && time.Now().Before(h.PairingExpiry) {
 		return h.PairingCode // still valid
 	}

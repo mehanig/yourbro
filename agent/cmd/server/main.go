@@ -122,7 +122,9 @@ func main() {
 		defer ticker.Stop()
 		for range ticker.C {
 			code := pairHandler.Regenerate(generatePairingCode)
-			log.Printf("=== PAIRING CODE: %s (expires in 5 minutes) ===", code)
+			if !pairHandler.IsPaired() {
+				log.Printf("=== PAIRING CODE: %s (expires in 5 minutes) ===", code)
+			}
 		}
 	}()
 
