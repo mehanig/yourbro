@@ -49,6 +49,7 @@ The API `Dockerfile` builds Go API. Frontend is NOT embedded — it deploys inde
 - The shell (`web/public/p/shell.html`) fetches the page bundle via E2E encrypted relay, caches files in the SW, then sets `iframe.src = "/p/assets/{slug}/index.html"` — the SW serves it. Relative URLs resolve naturally from the iframe's actual URL.
 - `sandbox="allow-scripts allow-same-origin"` is required for the iframe to use the parent's Service Worker
 - Cloudflare Transform Rules: the `/p/*` shell rule excludes `.js`, `.css`, `.json` extensions so the SW file and cached assets are served correctly (not rewritten to shell.html)
+- **Page Storage**: Iframed pages communicate with the agent via `postMessage` → shell.html → E2E encrypted relay → agent `/api/page-storage/*` endpoints. No crypto in the iframe — shell is the encryption proxy. Slug is hardcoded by the shell (iframe can't write to other pages' storage).
 
 ### SECURITY: E2E encryption for page content relay
 

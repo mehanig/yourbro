@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,14 +9,16 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	mw "github.com/mehanig/yourbro/agent/internal/middleware"
-	"github.com/mehanig/yourbro/agent/internal/testutil"
 )
 
-// newIntegrationRouter builds a full agent router with auth middleware on storage and key routes.
+// newIntegrationRouter builds a full agent router matching the new architecture:
+// - Pairing via POST /api/pair
+// - Auth check via POST /api/auth-check (no middleware — E2E relay is auth)
+// - Key revocation via POST /api/revoke-key (X-Yourbro-Key-ID header)
+// - Storage routes (no middleware — reached via E2E encrypted relay)
 func newIntegrationRouter(t *testing.T) (*PairHandler, *chi.Mux) {
 	t.Helper()
-	db := testutil.NewTestDB(t)
+	db := newTestDB(t)
 
 	storageHandler := &StorageHandler{DB: db}
 	pairHandler := &PairHandler{
@@ -26,12 +29,12 @@ func newIntegrationRouter(t *testing.T) (*PairHandler, *chi.Mux) {
 
 	r := chi.NewRouter()
 	r.Post("/api/pair", pairHandler.Pair)
-	r.Route("/api/keys", func(r chi.Router) {
-		r.Use(mw.VerifyUserSignature(db))
-		r.Delete("/", pairHandler.RevokeKey)
+	r.Post("/api/auth-check", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"paired"}`))
 	})
+	r.Post("/api/revoke-key", pairHandler.RevokeKey)
 	r.Route("/api/storage/{slug}", func(r chi.Router) {
-		r.Use(mw.VerifyUserSignature(db))
 		r.Get("/", storageHandler.List)
 		r.Get("/{key}", storageHandler.Get)
 		r.Put("/{key}", storageHandler.Set)
@@ -42,11 +45,12 @@ func newIntegrationRouter(t *testing.T) (*PairHandler, *chi.Mux) {
 
 func TestIntegration_FullLifecycle(t *testing.T) {
 	_, router := newIntegrationRouter(t)
-	pub, priv := testutil.TestKeypair(t)
-	pubB64 := testutil.KeyID(pub)
+	key := make([]byte, 32)
+	key[0] = 42
+	keyID := base64.RawURLEncoding.EncodeToString(key)
 
 	// Step 1: Pair
-	pairBody := `{"pairing_code":"INTGCODE","user_public_key":"` + pubB64 + `","username":"alice"}`
+	pairBody := `{"pairing_code":"INTGCODE","user_x25519_public_key":"` + keyID + `","username":"alice"}`
 	req := httptest.NewRequest("POST", "/api/pair", strings.NewReader(pairBody))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -54,19 +58,17 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		t.Fatalf("pair: want 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Step 2: Set a value (signed)
+	// Step 2: Set a value (in real flow this reaches the agent via E2E relay)
 	setBody := `{"count":42}`
-	req = httptest.NewRequest("PUT", "http://localhost/api/storage/mypage/counter", strings.NewReader(setBody))
-	testutil.SignRequestWithBody(req, priv, pub, setBody)
+	req = httptest.NewRequest("PUT", "/api/storage/mypage/counter", strings.NewReader(setBody))
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("set: want 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Step 3: Get the value (signed)
-	req = httptest.NewRequest("GET", "http://localhost/api/storage/mypage/counter", nil)
-	testutil.SignRequest(req, priv, pub)
+	// Step 3: Get the value
+	req = httptest.NewRequest("GET", "/api/storage/mypage/counter", nil)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -76,18 +78,16 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		t.Errorf("get body: %s", w.Body.String())
 	}
 
-	// Step 4: List (signed)
-	req = httptest.NewRequest("GET", "http://localhost/api/storage/mypage/", nil)
-	testutil.SignRequest(req, priv, pub)
+	// Step 4: List
+	req = httptest.NewRequest("GET", "/api/storage/mypage/", nil)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("list: want 200, got %d", w.Code)
 	}
 
-	// Step 5: Delete entry (signed)
-	req = httptest.NewRequest("DELETE", "http://localhost/api/storage/mypage/counter", nil)
-	testutil.SignRequest(req, priv, pub)
+	// Step 5: Delete entry
+	req = httptest.NewRequest("DELETE", "/api/storage/mypage/counter", nil)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -95,8 +95,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	}
 
 	// Step 6: Verify entry is gone
-	req = httptest.NewRequest("GET", "http://localhost/api/storage/mypage/counter", nil)
-	testutil.SignRequest(req, priv, pub)
+	req = httptest.NewRequest("GET", "/api/storage/mypage/counter", nil)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
@@ -104,13 +103,14 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	}
 }
 
-func TestIntegration_PairRevokeAccessDenied(t *testing.T) {
-	_, router := newIntegrationRouter(t)
-	pub, priv := testutil.TestKeypair(t)
-	pubB64 := testutil.KeyID(pub)
+func TestIntegration_PairRevokeKey(t *testing.T) {
+	h, router := newIntegrationRouter(t)
+	key := make([]byte, 32)
+	key[0] = 99
+	keyID := base64.RawURLEncoding.EncodeToString(key)
 
 	// Pair
-	pairBody := `{"pairing_code":"INTGCODE","user_public_key":"` + pubB64 + `","username":"alice"}`
+	pairBody := `{"pairing_code":"INTGCODE","user_x25519_public_key":"` + keyID + `","username":"alice"}`
 	req := httptest.NewRequest("POST", "/api/pair", strings.NewReader(pairBody))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -118,79 +118,22 @@ func TestIntegration_PairRevokeAccessDenied(t *testing.T) {
 		t.Fatalf("pair: want 200, got %d", w.Code)
 	}
 
-	// Set works
-	setBody := `"hello"`
-	req = httptest.NewRequest("PUT", "http://localhost/api/storage/test/key", strings.NewReader(setBody))
-	testutil.SignRequestWithBody(req, priv, pub, setBody)
-	w = httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("set before revoke: want 200, got %d", w.Code)
+	// Verify paired
+	if _, ok := h.DB.IsX25519KeyAuthorized(keyID); !ok {
+		t.Fatal("should be authorized after pairing")
 	}
 
-	// Revoke key
-	req = httptest.NewRequest("DELETE", "http://localhost/api/keys", nil)
-	testutil.SignRequest(req, priv, pub)
+	// Revoke key via X-Yourbro-Key-ID header
+	req = httptest.NewRequest("POST", "/api/revoke-key", nil)
+	req.Header.Set("X-Yourbro-Key-ID", keyID)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("revoke: want 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Storage access now denied (403)
-	req = httptest.NewRequest("GET", "http://localhost/api/storage/test/key", nil)
-	testutil.SignRequest(req, priv, pub)
-	w = httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("after revoke: want 403, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestIntegration_MultipleUsersIsolated(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	storageHandler := &StorageHandler{DB: db}
-
-	pubA, privA := testutil.TestKeypair(t)
-	pubB, privB := testutil.TestKeypair(t)
-	kidA := testutil.KeyID(pubA)
-	kidB := testutil.KeyID(pubB)
-
-	// Add both keys
-	db.AddAuthorizedKey(kidA, "alice")
-	db.AddAuthorizedKey(kidB, "bob")
-
-	r := chi.NewRouter()
-	r.Route("/api/storage/{slug}", func(r chi.Router) {
-		r.Use(mw.VerifyUserSignature(db))
-		r.Put("/{key}", storageHandler.Set)
-		r.Get("/{key}", storageHandler.Get)
-	})
-
-	// Alice writes
-	setBody := `"alice-data"`
-	req := httptest.NewRequest("PUT", "http://localhost/api/storage/page/data", strings.NewReader(setBody))
-	testutil.SignRequestWithBody(req, privA, pubA, setBody)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("alice set: want 200, got %d", w.Code)
-	}
-
-	// Bob can also read (storage is per-slug, not per-user)
-	req = httptest.NewRequest("GET", "http://localhost/api/storage/page/data", nil)
-	testutil.SignRequest(req, privB, pubB)
-	w = httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("bob get: want 200, got %d", w.Code)
-	}
-
-	// Unsigned request is rejected
-	req = httptest.NewRequest("GET", "http://localhost/api/storage/page/data", nil)
-	w = httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("unsigned: want 401, got %d", w.Code)
+	// Key should be gone
+	if _, ok := h.DB.IsX25519KeyAuthorized(keyID); ok {
+		t.Fatal("key should be removed after revocation")
 	}
 }

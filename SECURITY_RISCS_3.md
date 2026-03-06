@@ -12,7 +12,7 @@ The iframe uses `sandbox="allow-scripts allow-same-origin"` — `allow-same-orig
 
 Since the iframe loads from the same origin (`yourbro.ai` via SW), combining `allow-scripts` + `allow-same-origin` effectively **negates the sandbox**:
 
-1. **IndexedDB access**: Iframe JS can read `clawd-keys` IndexedDB store and exfiltrate Ed25519 private keys
+1. **IndexedDB access**: Iframe JS can read `clawd-keys` IndexedDB store and exfiltrate X25519 private keys
 2. **Cookie access**: Iframe JS can make same-origin fetch requests with credentials
 3. **Parent DOM access**: Iframe JS can access `parent.document` since it's same-origin
 4. **Sandbox escape**: Iframe JS can create a new iframe without sandbox attributes, fully escaping the sandbox

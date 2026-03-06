@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/base64"
 	"testing"
 )
 
@@ -14,14 +15,18 @@ func newTestDB(t *testing.T) *DB {
 	return db
 }
 
-// --- Authorized Keys ---
+// --- Authorized Keys (X25519) ---
 
 func TestAuthorizedKeys_AddAndCheck(t *testing.T) {
 	db := newTestDB(t)
-	if err := db.AddAuthorizedKey("key1", "alice"); err != nil {
+	key := make([]byte, 32)
+	key[0] = 1
+	keyID := base64.RawURLEncoding.EncodeToString(key)
+
+	if err := db.AddAuthorizedX25519Key(key, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	username, ok := db.IsKeyAuthorized("key1")
+	username, ok := db.IsX25519KeyAuthorized(keyID)
 	if !ok {
 		t.Fatal("key should be authorized")
 	}
@@ -32,7 +37,7 @@ func TestAuthorizedKeys_AddAndCheck(t *testing.T) {
 
 func TestAuthorizedKeys_NotFound(t *testing.T) {
 	db := newTestDB(t)
-	_, ok := db.IsKeyAuthorized("nonexistent")
+	_, ok := db.IsX25519KeyAuthorized("nonexistent")
 	if ok {
 		t.Fatal("nonexistent key should not be authorized")
 	}
@@ -40,13 +45,17 @@ func TestAuthorizedKeys_NotFound(t *testing.T) {
 
 func TestAuthorizedKeys_Delete(t *testing.T) {
 	db := newTestDB(t)
-	if err := db.AddAuthorizedKey("key1", "alice"); err != nil {
+	key := make([]byte, 32)
+	key[0] = 1
+	keyID := base64.RawURLEncoding.EncodeToString(key)
+
+	if err := db.AddAuthorizedX25519Key(key, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.DeleteAuthorizedKey("key1"); err != nil {
+	if err := db.DeleteAuthorizedX25519Key(keyID); err != nil {
 		t.Fatal(err)
 	}
-	_, ok := db.IsKeyAuthorized("key1")
+	_, ok := db.IsX25519KeyAuthorized(keyID)
 	if ok {
 		t.Fatal("deleted key should not be authorized")
 	}
@@ -54,33 +63,37 @@ func TestAuthorizedKeys_Delete(t *testing.T) {
 
 func TestAuthorizedKeys_DeleteReloadsCache(t *testing.T) {
 	db := newTestDB(t)
-	if err := db.AddAuthorizedKey("key1", "alice"); err != nil {
+	key := make([]byte, 32)
+	key[0] = 1
+	keyID := base64.RawURLEncoding.EncodeToString(key)
+
+	if err := db.AddAuthorizedX25519Key(key, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	// Verify it's in cache
-	if _, ok := db.IsKeyAuthorized("key1"); !ok {
+	if _, ok := db.IsX25519KeyAuthorized(keyID); !ok {
 		t.Fatal("key should be in cache")
 	}
-	// Delete
-	if err := db.DeleteAuthorizedKey("key1"); err != nil {
+	if err := db.DeleteAuthorizedX25519Key(keyID); err != nil {
 		t.Fatal(err)
 	}
-	// Cache should be updated immediately
-	if _, ok := db.IsKeyAuthorized("key1"); ok {
+	if _, ok := db.IsX25519KeyAuthorized(keyID); ok {
 		t.Fatal("deleted key should not be in cache")
 	}
 }
 
 func TestAuthorizedKeys_DuplicateKey(t *testing.T) {
 	db := newTestDB(t)
-	if err := db.AddAuthorizedKey("key1", "alice"); err != nil {
+	key := make([]byte, 32)
+	key[0] = 1
+	keyID := base64.RawURLEncoding.EncodeToString(key)
+
+	if err := db.AddAuthorizedX25519Key(key, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	// Re-add with different username (INSERT OR REPLACE)
-	if err := db.AddAuthorizedKey("key1", "bob"); err != nil {
+	if err := db.AddAuthorizedX25519Key(key, "bob"); err != nil {
 		t.Fatal(err)
 	}
-	username, ok := db.IsKeyAuthorized("key1")
+	username, ok := db.IsX25519KeyAuthorized(keyID)
 	if !ok {
 		t.Fatal("key should still be authorized")
 	}
@@ -91,8 +104,9 @@ func TestAuthorizedKeys_DuplicateKey(t *testing.T) {
 
 func TestAuthorizedKeys_DeleteNonexistent(t *testing.T) {
 	db := newTestDB(t)
-	// Should not error
-	if err := db.DeleteAuthorizedKey("nonexistent"); err != nil {
+	key := make([]byte, 32)
+	keyID := base64.RawURLEncoding.EncodeToString(key)
+	if err := db.DeleteAuthorizedX25519Key(keyID); err != nil {
 		t.Fatalf("deleting nonexistent key should not error: %v", err)
 	}
 }

@@ -3,7 +3,6 @@ package relay
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -43,9 +42,8 @@ func (r *Router) handleEncryptedRequest(ctx context.Context, req Request) Respon
 		return Response{ID: req.ID, Status: 400, Body: &body}
 	}
 
-	// Find the cipher — use first authorized user's X25519 key
-	// (single-user agent for now)
-	cipher, err := r.getUserCipher()
+	// Find the cipher by key_id (X25519 public key of sender)
+	cipher, err := r.getUserCipher(req.KeyID)
 	if err != nil {
 		log.Printf("E2E: no cipher available: %v", err)
 		body := `{"error":"e2e decryption not available"}`
@@ -68,6 +66,14 @@ func (r *Router) handleEncryptedRequest(ctx context.Context, req Request) Respon
 		return Response{ID: req.ID, Status: 400, Body: &body}
 	}
 	innerReq.ID = req.ID
+
+	// Inject key_id so inner handlers know which user made the request
+	if req.KeyID != "" {
+		if innerReq.Headers == nil {
+			innerReq.Headers = make(map[string]string)
+		}
+		innerReq.Headers["X-Yourbro-Key-ID"] = req.KeyID
+	}
 
 	// Process the cleartext request
 	resp := r.handleCleartextRequest(ctx, innerReq)
@@ -92,17 +98,32 @@ func (r *Router) handleEncryptedRequest(ctx context.Context, req Request) Respon
 	}
 }
 
-func (r *Router) getUserCipher() (*e2e.Cipher, error) {
+func (r *Router) getUserCipher(keyID string) (*e2e.Cipher, error) {
 	if r.DB == nil {
 		return nil, fmt.Errorf("no database")
 	}
 
-	// Get first authorized user's X25519 key
-	keys := r.DB.ListAuthorizedKeysWithX25519()
+	// Look up by key_id if provided (base64url-encoded X25519 public key)
+	if keyID != "" {
+		keyBytes, err := base64.RawURLEncoding.DecodeString(keyID)
+		if err == nil && len(keyBytes) == 32 {
+			pub, err := r.DB.GetX25519KeyByPublicBytes(keyBytes)
+			if err == nil {
+				return r.CipherCache.Get(pub)
+			}
+		}
+		log.Printf("E2E: key_id lookup failed, key not found")
+		return nil, fmt.Errorf("unknown key_id")
+	}
+
+	// Fallback: single-user mode (no key_id provided)
+	keys := r.DB.ListAuthorizedKeys()
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("no paired users with X25519 keys")
 	}
-
+	if len(keys) > 1 {
+		log.Printf("E2E: WARNING — multiple paired users but no key_id in request, using first key")
+	}
 	return r.CipherCache.Get(keys[0])
 }
 
@@ -141,21 +162,12 @@ func (r *Router) handleCleartextRequest(ctx context.Context, req Request) Respon
 		bodyReader = bytes.NewReader(nil)
 	}
 
-	// Use canonical host for relay-mode RFC 9421 signatures
 	targetURL := "https://relay.internal" + req.Path
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method, targetURL, bodyReader)
 	if err != nil {
 		body := `{"error":"failed to build request"}`
 		return Response{ID: req.ID, Status: 500, Body: &body}
 	}
-
-	// Mark as TLS so the auth middleware reconstructs @target-uri with https://
-	// (matching what the SDK signed against)
-	httpReq.TLS = &tls.ConnectionState{}
-
-	// NewRequestWithContext leaves RequestURI empty; the auth middleware uses it
-	// to reconstruct @target-uri for RFC 9421 signature verification.
-	httpReq.RequestURI = req.Path
 
 	// Copy headers from relay message
 	for k, v := range req.Headers {

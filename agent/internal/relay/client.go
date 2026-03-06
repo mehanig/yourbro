@@ -30,6 +30,7 @@ type Request struct {
 	Body      *string           `json:"body,omitempty"`
 	Encrypted bool              `json:"encrypted,omitempty"`
 	Payload   string            `json:"payload,omitempty"`
+	KeyID     string            `json:"key_id,omitempty"` // base64url X25519 public key of sender
 }
 
 // Response is the relay response payload (agent → server).

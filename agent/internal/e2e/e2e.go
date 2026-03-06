@@ -74,7 +74,7 @@ type CipherCache struct {
 	agentPriv *ecdh.PrivateKey
 }
 
-// NewCipherCache creates a cache of ciphers keyed by user Ed25519 public key.
+// NewCipherCache creates a cache of ciphers keyed by user X25519 public key.
 func NewCipherCache(agentPriv *ecdh.PrivateKey) *CipherCache {
 	return &CipherCache{
 		ciphers:   make(map[string]*Cipher),

@@ -14,12 +14,17 @@ import {
   type Agent,
 } from "../lib/api";
 import {
-  getOrCreateKeypair,
   getOrCreateX25519Keypair,
   storeAgentX25519Key,
+  loadAgentX25519Key,
   base64RawUrlEncode,
   base64RawUrlDecode,
 } from "../lib/crypto";
+import {
+  deriveE2EKey,
+  encryptedRelay,
+  x25519KeyId,
+} from "../lib/e2e";
 
 /** Active SSE connection — closed before re-render to prevent leaks. */
 let activeSSE: EventSource | null = null;
@@ -37,44 +42,23 @@ function esc(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/** Create an RFC 9421 signature for a relay request. */
-async function signRelayRequest(method: string, path: string): Promise<{ sigInput: string; sig: string }> {
-  const { privateKey, publicKeyBytes } = await getOrCreateKeypair();
-  const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
-  const created = Math.floor(Date.now() / 1000);
-  const nonce = crypto.randomUUID();
-  const targetUri = `https://relay.internal${path}`;
-  const sigParams = `("@method" "@target-uri");created=${created};nonce="${nonce}";keyid="${pubKeyB64}"`;
-  const signatureBase = `"@method": ${method}\n"@target-uri": ${targetUri}\n"@signature-params": ${sigParams}`;
-  const sigBytes = await crypto.subtle.sign("Ed25519", privateKey, new TextEncoder().encode(signatureBase));
-  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sigBytes)));
-  return {
-    sigInput: `sig1=${sigParams}`,
-    sig: `sig1=:${sigB64}:`,
-  };
-}
-
-/** Probe an agent via relay to check if this browser's Ed25519 key is authorized. */
+/** Probe an agent via E2E encrypted relay to check pairing status. */
 async function probeAgentPairing(agentId: number): Promise<boolean> {
   try {
-    const { sigInput, sig } = await signRelayRequest("GET", "/api/auth-check");
-    const res = await fetch(`${API_BASE}/api/relay/${agentId}`, {
+    // Check if we have the agent's X25519 key in IndexedDB
+    const agentPubBytes = await loadAgentX25519Key(String(agentId));
+    if (!agentPubBytes) return false;
+
+    const x25519kp = await getOrCreateX25519Keypair();
+    const aesKey = await deriveE2EKey(x25519kp.privateKey, agentPubBytes);
+    const userKeyID = x25519KeyId(x25519kp.publicKeyBytes);
+
+    const resp = await encryptedRelay(agentId, aesKey, userKeyID, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({
-        id: crypto.randomUUID(),
-        method: "GET",
-        path: "/api/auth-check",
-        headers: {
-          "Signature-Input": sigInput,
-          "Signature": sig,
-        },
-      }),
+      path: "/api/auth-check",
     });
-    if (!res.ok) return false;
-    const envelope = await res.json();
-    return envelope.status === 200;
+
+    return resp !== null && resp.status === 200;
   } catch {
     return false;
   }
@@ -154,29 +138,21 @@ function bindRemoveHandlers(container: HTMLElement) {
       if (!confirm("Remove this agent?")) return;
 
       try {
-        const { sigInput, sig } = await signRelayRequest("DELETE", "/api/keys");
-        const res = await fetch(`${API_BASE}/api/relay/${id}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            id: crypto.randomUUID(),
-            method: "DELETE",
-            path: "/api/keys",
-            headers: {
-              "Signature-Input": sigInput,
-              "Signature": sig,
-            },
-          }),
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({ error: res.statusText }));
-          alert(`Can't unpair: ${data.error || res.statusText}`);
-          return;
+        // Try to revoke via E2E encrypted relay
+        const agentPubBytes = await loadAgentX25519Key(String(id));
+        if (agentPubBytes) {
+          const x25519kp = await getOrCreateX25519Keypair();
+          const aesKey = await deriveE2EKey(x25519kp.privateKey, agentPubBytes);
+          const userKeyID = x25519KeyId(x25519kp.publicKeyBytes);
+
+          await encryptedRelay(id, aesKey, userKeyID, {
+            method: "POST",
+            path: "/api/revoke-key",
+          });
         }
       } catch (err) {
-        alert("Can't unpair: relay failed.\n" + (err instanceof Error ? err.message : String(err)));
-        return;
+        // Best-effort — continue to remove from server even if relay fails
+        console.warn("Relay revocation failed:", err);
       }
 
       await deleteAgent(id);
@@ -224,37 +200,26 @@ async function renderPagesList(agents: Agent[], username: string, container: HTM
   pagesEl.querySelectorAll(".delete-page").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const slug = (btn as HTMLElement).dataset.slug!;
-      const agentId = (btn as HTMLElement).dataset.agentId!;
+      const agentId = Number((btn as HTMLElement).dataset.agentId!);
       if (!confirm(`Delete page "${slug}"?`)) return;
 
       try {
-        const targetUri = `https://relay.internal/api/page/${encodeURIComponent(slug)}`;
-        const { privateKey, publicKeyBytes } = await getOrCreateKeypair();
-        const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
-        const created = Math.floor(Date.now() / 1000);
-        const nonce = crypto.randomUUID();
-        const sigParams = `("@method" "@target-uri");created=${created};nonce="${nonce}";keyid="${pubKeyB64}"`;
-        const signatureBase = `"@method": DELETE\n"@target-uri": ${targetUri}\n"@signature-params": ${sigParams}`;
-        const sig = await crypto.subtle.sign("Ed25519", privateKey, new TextEncoder().encode(signatureBase));
-        const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)));
+        const agentPubBytes = await loadAgentX25519Key(String(agentId));
+        if (!agentPubBytes) {
+          alert("Cannot delete: agent encryption keys missing. Re-pair your agent.");
+          return;
+        }
+        const x25519kp = await getOrCreateX25519Keypair();
+        const aesKey = await deriveE2EKey(x25519kp.privateKey, agentPubBytes);
+        const userKeyID = x25519KeyId(x25519kp.publicKeyBytes);
 
-        const res = await fetch(`${API_BASE}/api/relay/${agentId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            id: crypto.randomUUID(),
-            method: "DELETE",
-            path: `/api/page/${encodeURIComponent(slug)}`,
-            headers: {
-              "Signature-Input": `sig1=${sigParams}`,
-              "Signature": `sig1=:${sigB64}:`,
-            },
-          }),
+        const resp = await encryptedRelay(agentId, aesKey, userKeyID, {
+          method: "DELETE",
+          path: `/api/page/${encodeURIComponent(slug)}`,
         });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({ error: res.statusText }));
-          alert(`Delete failed: ${data.error || res.statusText}`);
+
+        if (!resp || resp.status < 200 || resp.status >= 300) {
+          alert(`Delete failed: ${resp?.body || "unknown error"}`);
           return;
         }
         renderPagesList(agents, username, container);
@@ -290,9 +255,6 @@ function bindPairHandlers(agents: Agent[], user: User, container: HTMLElement) {
       statusEl.textContent = "Pairing via relay...";
 
       try {
-        const { publicKeyBytes } = await getOrCreateKeypair();
-        const pubKeyB64 = base64RawUrlEncode(publicKeyBytes);
-
         const x25519kp = await getOrCreateX25519Keypair();
         const x25519PubB64 = base64RawUrlEncode(x25519kp.publicKeyBytes);
 
@@ -307,7 +269,6 @@ function bindPairHandlers(agents: Agent[], user: User, container: HTMLElement) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               pairing_code: code,
-              user_public_key: pubKeyB64,
               user_x25519_public_key: x25519PubB64,
               username: user.username,
             }),
@@ -366,10 +327,10 @@ export async function renderDashboard(container: HTMLElement) {
     return;
   }
 
-  // Check if browser has any Ed25519 keypair — if not, all agents are unpaired
+  // Check if browser has X25519 keypair — if not, all agents are unpaired
   let hasKeypair = false;
   try {
-    await getOrCreateKeypair();
+    await getOrCreateX25519Keypair();
     hasKeypair = true;
   } catch { /* no keypair */ }
 

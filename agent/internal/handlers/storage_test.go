@@ -7,12 +7,11 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/mehanig/yourbro/agent/internal/testutil"
 )
 
 func newStorageRouter(t *testing.T) *chi.Mux {
 	t.Helper()
-	db := testutil.NewTestDB(t)
+	db := newTestDB(t)
 	h := &StorageHandler{DB: db}
 	r := chi.NewRouter()
 	r.Route("/api/storage/{slug}", func(r chi.Router) {

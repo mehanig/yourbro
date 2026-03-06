@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
-  getOrCreateKeypair,
   base64RawUrlEncode,
   base64StdEncode,
+  getOrCreateX25519Keypair,
 } from "./crypto";
 
 afterEach(() => {
@@ -36,19 +36,19 @@ describe("base64StdEncode", () => {
   });
 });
 
-describe("getOrCreateKeypair", () => {
-  it("generates a valid Ed25519 keypair with 32-byte public key", async () => {
-    const { privateKey, publicKeyBytes } = await getOrCreateKeypair();
+describe("getOrCreateX25519Keypair", () => {
+  it("generates a valid X25519 keypair with 32-byte public key", async () => {
+    const { privateKey, publicKeyBytes } = await getOrCreateX25519Keypair();
 
     expect(publicKeyBytes).toBeInstanceOf(Uint8Array);
     expect(publicKeyBytes.length).toBe(32);
-    expect(privateKey.algorithm.name).toBe("Ed25519");
+    expect(privateKey.algorithm.name).toBe("X25519");
     expect(privateKey.type).toBe("private");
   });
 
   it("returns the same keypair on second call (cached in IndexedDB)", async () => {
-    const first = await getOrCreateKeypair();
-    const second = await getOrCreateKeypair();
+    const first = await getOrCreateX25519Keypair();
+    const second = await getOrCreateX25519Keypair();
 
     expect(base64RawUrlEncode(first.publicKeyBytes)).toBe(
       base64RawUrlEncode(second.publicKeyBytes)
@@ -56,50 +56,7 @@ describe("getOrCreateKeypair", () => {
   });
 
   it("re-imports private key as non-extractable", async () => {
-    const { privateKey } = await getOrCreateKeypair();
+    const { privateKey } = await getOrCreateX25519Keypair();
     expect(privateKey.extractable).toBe(false);
-  });
-
-  it("private key can sign and verify", async () => {
-    const { privateKey, publicKeyBytes } = await getOrCreateKeypair();
-    const data = new TextEncoder().encode("test message");
-
-    const sig = await crypto.subtle.sign("Ed25519", privateKey, data);
-    expect(sig.byteLength).toBe(64);
-
-    // Verify with public key
-    const pubKey = await crypto.subtle.importKey(
-      "raw",
-      publicKeyBytes,
-      "Ed25519",
-      true,
-      ["verify"]
-    );
-    const valid = await crypto.subtle.verify("Ed25519", pubKey, sig, data);
-    expect(valid).toBe(true);
-  });
-
-  it("signature fails verification with wrong data", async () => {
-    const { privateKey, publicKeyBytes } = await getOrCreateKeypair();
-    const sig = await crypto.subtle.sign(
-      "Ed25519",
-      privateKey,
-      new TextEncoder().encode("original")
-    );
-
-    const pubKey = await crypto.subtle.importKey(
-      "raw",
-      publicKeyBytes,
-      "Ed25519",
-      true,
-      ["verify"]
-    );
-    const valid = await crypto.subtle.verify(
-      "Ed25519",
-      pubKey,
-      sig,
-      new TextEncoder().encode("tampered")
-    );
-    expect(valid).toBe(false);
   });
 });

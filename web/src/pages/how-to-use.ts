@@ -62,7 +62,7 @@ export function renderHowToUse(container: HTMLElement) {
           ${[
             { n: 1, title: "Sign in", desc: "Authenticate with your Google account to get your yourbro dashboard." },
             { n: 2, title: "Install the yourbro skill", desc: "Install the yourbro skill on your ClawdBot. It connects outbound via WebSocket relay\u2014no port forwarding or public IP needed." },
-            { n: 3, title: "Pair your ClawdBot", desc: "Enter the one-time pairing code shown by your ClawdBot. This exchanges X25519 keys for end-to-end encryption and Ed25519 keys for request signing." },
+            { n: 3, title: "Pair your ClawdBot", desc: "Enter the one-time pairing code shown by your ClawdBot. This exchanges X25519 keys for end-to-end encryption." },
             { n: 4, title: "Publish pages", desc: "Your ClawdBot publishes pages delivered via E2E encrypted relay. The server never sees your content." },
           ].map(s => `
             <div style="display:flex;align-items:flex-start;gap:1rem;padding:1rem 1.25rem;background:#161b22;border:1px solid #30363d;border-radius:10px;">
@@ -83,10 +83,10 @@ export function renderHowToUse(container: HTMLElement) {
           <h3 style="font-size:1.1rem;font-weight:700;">How Pairing Works</h3>
         </div>
         <p style="color:#8b949e;font-size:0.92rem;line-height:1.65;margin-bottom:1rem;">
-          Your ClawdBot generates Ed25519 (signing) and X25519 (encryption) keypairs on startup. You enter the one-time pairing code in your dashboard. The browser and ClawdBot exchange public keys. All subsequent requests are signed with Ed25519 and encrypted with AES-256-GCM derived from X25519 key exchange.
+          Your ClawdBot generates an X25519 keypair on startup. You enter the one-time pairing code in your dashboard. The browser and ClawdBot exchange X25519 public keys. All subsequent requests are E2E encrypted with AES-256-GCM derived from the X25519 key exchange — if decryption succeeds, the sender is authenticated.
         </p>
         <div style="padding:0.75rem 1rem;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-family:monospace;font-size:0.82rem;color:#8b949e;line-height:1.7;">
-          ClawdBot generates keypairs &rarr; You enter pairing code &rarr; X25519 + Ed25519 keys exchanged &rarr; E2E encrypted relay
+          ClawdBot generates X25519 keypair &rarr; You enter pairing code &rarr; X25519 keys exchanged &rarr; E2E encrypted relay
         </div>
       </div>
 
@@ -113,7 +113,7 @@ export function renderHowToUse(container: HTMLElement) {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">
           ${[
             { title: "E2E Encryption", desc: "X25519 ECDH key exchange + HKDF-SHA256 derives AES-256-GCM keys. The relay server never sees plaintext." },
-            { title: "Ed25519 Signatures", desc: "Every request is signed with RFC 9421 HTTP Message Signatures. No bearer tokens to steal." },
+            { title: "Implicit Authentication", desc: "E2E encryption IS the authentication — if decryption succeeds, the sender must possess the paired key. No bearer tokens to steal." },
             { title: "WebSocket Relay", desc: "Your ClawdBot connects outbound\u2014no exposed ports, no public IP. The server is a pass-through pipe." },
             { title: "Zero Server Secrets", desc: "No private keys stored server-side. Encryption keys are derived from your keypair and your ClawdBot\u2019s keypair." },
           ].map(s => `

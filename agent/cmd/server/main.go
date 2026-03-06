@@ -44,7 +44,7 @@ func main() {
 
 	log.Printf("=== PAIRING CODE: %s (expires in 5 minutes) ===", pairingCode)
 
-	storageHandler := &handlers.StorageHandler{DB: db}
+	pageStorageHandler := &handlers.PageStorageHandler{DB: db}
 	pagesHandler := &handlers.PagesHandler{PagesDir: pagesDir}
 	pairHandler := &handlers.PairHandler{
 		DB:            db,
@@ -66,34 +66,25 @@ func main() {
 	// Pairing endpoint (no auth — pairing code IS the auth)
 	r.Post("/api/pair", pairHandler.Pair)
 
-	// Auth check — browser probes this to detect pairing status
-	r.Route("/api/auth-check", func(r chi.Router) {
-		r.Use(mw.VerifyUserSignature(db))
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			username := mw.GetUsername(r)
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"status":"paired","username":"` + username + `"}`))
-		})
+	// Auth check — browser probes this via E2E encrypted relay to detect pairing status
+	r.Post("/api/auth-check", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"paired"}`))
 	})
 
-	// Key revocation (require user signature — RFC 9421)
-	r.Route("/api/keys", func(r chi.Router) {
-		r.Use(mw.VerifyUserSignature(db))
-		r.Delete("/", pairHandler.RevokeKey)
-	})
+	// Key revocation — via E2E encrypted relay (relay router injects X-Yourbro-Key-ID)
+	r.Post("/api/revoke-key", pairHandler.RevokeKey)
 
 	// Page routes — read-only via relay. Pages are created by ClawdBot internally.
 	r.Get("/api/pages", pagesHandler.List)
 	r.Get("/api/page/{slug}", pagesHandler.Get)
 
-	// Storage routes (require user signature — RFC 9421)
-	r.Route("/api/storage/{slug}", func(r chi.Router) {
-		r.Use(mw.VerifyUserSignature(db))
-		r.Get("/", storageHandler.List)
-		r.Get("/{key}", storageHandler.Get)
-		r.Put("/{key}", storageHandler.Set)
-		r.Delete("/{key}", storageHandler.Delete)
-	})
+	// Page storage routes (auth via E2E encryption — only paired users can decrypt/encrypt)
+	r.Post("/api/page-storage/get", pageStorageHandler.Get)
+	r.Post("/api/page-storage/set", pageStorageHandler.Set)
+	r.Post("/api/page-storage/delete", pageStorageHandler.Delete)
+	r.Post("/api/page-storage/list", pageStorageHandler.List)
+
 
 	// Relay mode — connect to server via WebSocket
 	apiToken := os.Getenv("YOURBRO_TOKEN")

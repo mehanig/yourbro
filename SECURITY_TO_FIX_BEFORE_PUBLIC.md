@@ -51,7 +51,7 @@ Audit date: 2026-03-05
 - **Fix**: Add security headers to nginx config
 
 ### 10. Browser keypair exposure via XSS
-- Ed25519 private key stored in IndexedDB; if XSS achieved (#2), attacker can extract keypair
+- X25519 private key stored in IndexedDB; if XSS achieved (#2), attacker can extract keypair
 - **Fix**: Fixing #2 (XSS) is the primary mitigation
 
 ## LOW

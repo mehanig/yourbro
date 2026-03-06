@@ -134,6 +134,14 @@
                 return;
             }
 
+            // User's X25519 public key as base64url — sent as key_id so agent knows which key to decrypt with
+            var userKeyId = '';
+            if (x25519kp && x25519kp.publicKeyBytes) {
+                var s = '';
+                for (var i = 0; i < x25519kp.publicKeyBytes.length; i++) s += String.fromCharCode(x25519kp.publicKeyBytes[i]);
+                userKeyId = btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            }
+
             // E2E helpers
             function e2eEncrypt(plaintext) {
                 var iv = crypto.getRandomValues(new Uint8Array(12));
@@ -180,6 +188,7 @@
                     body: JSON.stringify({
                         id: crypto.randomUUID(),
                         encrypted: true,
+                        key_id: userKeyId,
                         payload: toBase64(encrypted)
                     })
                 });
@@ -238,6 +247,75 @@
             iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
             container.appendChild(iframe);
             document.body.appendChild(container);
+
+            // 8. Storage bridge — relay iframe postMessage to agent via E2E
+            window.addEventListener('message', async function(event) {
+                if (!event.data || event.data.type !== 'yourbro-storage') return;
+                if (event.source !== iframe.contentWindow) return;
+
+                var action = event.data.action;
+                if (['get', 'set', 'delete', 'list'].indexOf(action) === -1) return;
+
+                var innerBody = JSON.stringify({
+                    slug: slug,
+                    key: event.data.key,
+                    value: event.data.value,
+                    prefix: event.data.prefix
+                });
+
+                try {
+                    var innerReq = JSON.stringify({
+                        id: crypto.randomUUID(),
+                        method: 'POST',
+                        path: '/api/page-storage/' + action,
+                        body: btoa(unescape(encodeURIComponent(innerBody))),
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    var encrypted = await e2eEncrypt(new TextEncoder().encode(innerReq));
+                    var resp = await fetch(API + '/api/relay/' + usedAgentId, {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            id: crypto.randomUUID(),
+                            encrypted: true,
+                            key_id: userKeyId,
+                            payload: toBase64(encrypted)
+                        })
+                    });
+
+                    var result = { ok: false };
+                    if (resp.ok) {
+                        var envelope = await resp.json();
+                        if (envelope.encrypted && envelope.payload) {
+                            var decrypted = await e2eDecrypt(fromBase64(envelope.payload));
+                            var innerResp = JSON.parse(new TextDecoder().decode(decrypted));
+                            if (innerResp.status >= 200 && innerResp.status < 300) {
+                                result = { ok: true, data: innerResp.body ? JSON.parse(innerResp.body) : null };
+                            } else {
+                                result = { ok: false, error: innerResp.body || 'Agent error' };
+                            }
+                        }
+                    }
+
+                    iframe.contentWindow.postMessage({
+                        type: 'yourbro-storage-response',
+                        action: action,
+                        requestId: event.data.requestId,
+                        ok: result.ok,
+                        data: result.data,
+                        error: result.error
+                    }, '*');
+                } catch(e) {
+                    iframe.contentWindow.postMessage({
+                        type: 'yourbro-storage-response',
+                        action: action,
+                        requestId: event.data.requestId,
+                        ok: false,
+                        error: e.message
+                    }, '*');
+                }
+            });
 
         })();
     </script>

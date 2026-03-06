@@ -70,6 +70,7 @@ type RelayRequest struct {
 	Body      *string           `json:"body,omitempty"`
 	Encrypted bool              `json:"encrypted,omitempty"`
 	Payload   string            `json:"payload,omitempty"` // base64 of IV + AES-GCM ciphertext
+	KeyID     string            `json:"key_id,omitempty"`  // base64url X25519 public key of sender
 }
 
 type RelayResponse struct {

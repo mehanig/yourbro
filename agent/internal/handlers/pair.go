@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mehanig/yourbro/agent/internal/middleware"
 	"github.com/mehanig/yourbro/agent/internal/storage"
 )
 
@@ -26,9 +25,8 @@ type PairHandler struct {
 
 type pairRequest struct {
 	PairingCode      string `json:"pairing_code"`
-	UserPublicKey    string `json:"user_public_key"`
+	UserX25519PubKey string `json:"user_x25519_public_key"`
 	Username         string `json:"username"`
-	UserX25519PubKey string `json:"user_x25519_public_key,omitempty"`
 }
 
 // Pair handles POST /api/pair.
@@ -75,10 +73,10 @@ func (h *PairHandler) Pair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate public key: must be base64-encoded 32-byte Ed25519 key
-	pubKeyBytes, err := base64.RawURLEncoding.DecodeString(req.UserPublicKey)
-	if err != nil || len(pubKeyBytes) != 32 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid public key: must be base64url-encoded 32-byte Ed25519 key"})
+	// Validate X25519 public key: must be base64url-encoded 32-byte key
+	x25519Bytes, err := base64.RawURLEncoding.DecodeString(req.UserX25519PubKey)
+	if err != nil || len(x25519Bytes) != 32 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid public key: must be base64url-encoded 32-byte X25519 key"})
 		return
 	}
 
@@ -87,18 +85,10 @@ func (h *PairHandler) Pair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store authorized key
-	if err := h.DB.AddAuthorizedKey(req.UserPublicKey, req.Username); err != nil {
+	// Store authorized X25519 key
+	if err := h.DB.AddAuthorizedX25519Key(x25519Bytes, req.Username); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store key"})
 		return
-	}
-
-	// Store user's X25519 public key if provided (for E2E encryption)
-	if req.UserX25519PubKey != "" {
-		x25519Bytes, err := base64.RawURLEncoding.DecodeString(req.UserX25519PubKey)
-		if err == nil && len(x25519Bytes) == 32 {
-			_ = h.DB.StoreUserX25519Key(req.UserPublicKey, x25519Bytes)
-		}
 	}
 
 	// Mark code as used (one-time)
@@ -118,13 +108,13 @@ func (h *PairHandler) Pair(w http.ResponseWriter, r *http.Request) {
 		log.Printf("=== E2E FINGERPRINT: %s === (verify this matches your browser)", fingerprint)
 	}
 
-	log.Printf("Paired with user %q (Ed25519: %s...)", req.Username, req.UserPublicKey[:8])
+	log.Printf("Paired with user %q (X25519: %s...)", req.Username, req.UserX25519PubKey[:8])
 	writeJSON(w, http.StatusOK, resp)
 }
 
 // IsPaired returns true if the agent has any authorized keys.
 func (h *PairHandler) IsPaired() bool {
-	return len(h.DB.ListAuthorizedKeysWithX25519()) > 0
+	return len(h.DB.ListAuthorizedKeys()) > 0
 }
 
 // Regenerate creates a fresh pairing code if the current one is expired, used, or agent was unpaired.
@@ -133,7 +123,7 @@ func (h *PairHandler) Regenerate(genCode func(int) string) string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	// Reset if keys were revoked (unpaired) so a new code can be used
-	if h.used && len(h.DB.ListAuthorizedKeysWithX25519()) == 0 {
+	if h.used && len(h.DB.ListAuthorizedKeys()) == 0 {
 		h.used = false
 	}
 	if !h.used && time.Now().Before(h.PairingExpiry) {
@@ -146,16 +136,16 @@ func (h *PairHandler) Regenerate(genCode func(int) string) string {
 	return h.PairingCode
 }
 
-// RevokeKey handles DELETE /api/keys — removes the signing key from authorized_keys.
-// Protected by VerifyUserSignature middleware, so only the key owner can revoke their own key.
+// RevokeKey handles POST /api/revoke-key — removes the X25519 key from authorized_keys.
+// Auth is via E2E encryption — relay router injects X-Yourbro-Key-ID header after decryption.
 func (h *PairHandler) RevokeKey(w http.ResponseWriter, r *http.Request) {
-	publicKey := middleware.GetPublicKey(r)
-	if publicKey == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no public key in context"})
+	keyID := r.Header.Get("X-Yourbro-Key-ID")
+	if keyID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no key ID in request"})
 		return
 	}
 
-	if err := h.DB.DeleteAuthorizedKey(publicKey); err != nil {
+	if err := h.DB.DeleteAuthorizedX25519Key(keyID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to revoke key"})
 		return
 	}

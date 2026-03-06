@@ -25,19 +25,19 @@ You (human)                     ClawdBot                                        
 
 When someone visits `yourbro.ai/p/{username}/{slug}`, a static HTML shell served from Cloudflare R2 runs client-side — it stays on `yourbro.ai` (same origin as the dashboard) so IndexedDB keypairs are accessible. The shell fetches agent IDs from the API, loads the page from the agent via relay, and renders it in a sandboxed iframe with the SDK injected.
 
-Storage operations use Ed25519 keypairs with [RFC 9421 HTTP Message Signatures](https://www.rfc-editor.org/rfc/rfc9421) and X25519 E2E encryption.
+Storage operations use X25519 E2E encryption — if decryption succeeds, the sender is authenticated.
 
 ```
 PAIRING (one-time):
 
 Browser                              Agent (via relay)
 ┌──────────────────┐                ┌──────────────────┐
-│ Generate Ed25519 │                │ Print pairing    │
-│ + X25519 keypairs│                │ code in logs     │
+│ Generate X25519  │                │ Print pairing    │
+│ keypair          │                │ code in logs     │
 │ (WebCrypto)      │                │                  │
 │ Enter code in    │                │                  │
 │ dashboard ───────┼── POST /pair ─>│ Verify code      │
-│                  │   (via relay)  │ Store public keys│
+│                  │   (via relay)  │ Store X25519 key │
 │                  │<── agent key ──│ Return X25519 key│
 └──────────────────┘                └──────────────────┘
 
@@ -55,12 +55,12 @@ Browser (yourbro.ai)     Cloudflare R2          api.yourbro.ai         Your Agen
    │                                                                        │
    │── Render in sandboxed iframe with SDK                                  │
 
-RUNTIME (every request, E2E encrypted + signed per RFC 9421):
+RUNTIME (every request, E2E encrypted):
 
 Browser              api.yourbro.ai          Your Agent
    │                    │                       │
    │── POST /relay/ID ─>│── WebSocket msg ─────>│
-   │   (E2E encrypted)  │   (opaque to server)  │── decrypt + verify signature
+   │   (E2E encrypted)  │   (opaque to server)  │── decrypt (auth = decryption success)
    │                    │                       │── process request
    │                    │<── WebSocket resp ────│
    │<── JSON data ──────│                       │
@@ -133,7 +133,7 @@ docker compose -f docker-compose.prod.yml -f docker-compose.local.yml logs agent
 
 In the dashboard, your agent appears in the "Paired Agents" section as online. Select it from the dropdown, enter the pairing code, and click **"Pair"**.
 
-This generates an Ed25519 keypair in your browser and registers it with the agent. One-time setup.
+This generates an X25519 keypair in your browser and registers it with the agent for E2E encryption. One-time setup.
 
 ### 6. Publish a Page
 
@@ -162,7 +162,7 @@ rm -rf /data/yourbro/pages/hello/
 
 Go to `http://localhost/p/YOUR_USERNAME/hello`
 
-The page loads in an iframe. The SDK auto-initializes, receives your keypair from the parent page via `postMessage`, and signs every storage request. Requests are relayed through the WebSocket to your agent.
+The page loads in an iframe. The SDK auto-initializes and communicates with the agent via E2E encrypted relay. Requests are encrypted with X25519 ECDH + AES-256-GCM and relayed through the WebSocket to your agent.
 
 ### SDK API
 
@@ -280,23 +280,23 @@ All agent endpoints are accessed through `POST /api/relay/{agent_id}`. The relay
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/health` | — | Health check |
-| POST | `/api/pair` | Pairing code | Register browser's public keys (Ed25519 + X25519) |
-| GET | `/api/auth-check` | RFC 9421 sig | Check if browser's key is authorized |
-| DELETE | `/api/keys` | RFC 9421 sig | Revoke browser's signing key |
+| POST | `/api/pair` | Pairing code | Register browser's X25519 public key |
+| POST | `/api/auth-check` | E2E relay | Check if browser is paired |
+| POST | `/api/revoke-key` | E2E relay | Revoke browser's encryption key |
 | GET | `/api/pages` | — | List all pages (scans page directories) |
 | GET | `/api/page/{slug}` | — | Get page file bundle (all files in directory) |
-| GET | `/api/storage/{slug}/{key}` | RFC 9421 sig | Get storage value |
-| PUT | `/api/storage/{slug}/{key}` | RFC 9421 sig | Set storage value |
-| GET | `/api/storage/{slug}?prefix=` | RFC 9421 sig | List storage keys |
-| DELETE | `/api/storage/{slug}/{key}` | RFC 9421 sig | Delete storage value |
+| GET | `/api/storage/{slug}/{key}` | E2E relay | Get storage value |
+| PUT | `/api/storage/{slug}/{key}` | E2E relay | Set storage value |
+| GET | `/api/storage/{slug}?prefix=` | E2E relay | List storage keys |
+| DELETE | `/api/storage/{slug}/{key}` | E2E relay | Delete storage value |
 
 ## Project Structure
 
 ```
 api/           Go backend (chi router, pgx) deployed to api.yourbro.ai
-agent/         Agent data server (Go, SQLite, relay WebSocket client, RFC 9421 auth)
+agent/         Agent data server (Go, SQLite, relay WebSocket client, E2E encryption)
 web/           Vite + TypeScript SPA (dashboard, login, pairing UI) + static page shell, deployed to Cloudflare R2 at yourbro.ai
-sdk/           ClawdStorage SDK (WebCrypto Ed25519, RFC 9421 signing, relay transport)
+sdk/           ClawdStorage SDK (WebCrypto X25519, E2E encryption, relay transport)
 migrations/    PostgreSQL schema migrations
 nginx/         Nginx configs (prod TLS + local dev)
 deploy/        Deployment scripts

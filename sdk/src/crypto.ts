@@ -1,8 +1,8 @@
 /**
- * WebCrypto Ed25519 keypair management.
+ * WebCrypto X25519 keypair management (legacy SDK).
  *
- * Generates a non-extractable private key and stores both keys in IndexedDB.
- * The private key never leaves the browser's crypto subsystem.
+ * Note: The SDK is no longer used by shell.html (which handles E2E directly),
+ * but kept for backwards compatibility with iframed pages that import it.
  */
 
 const DB_NAME = "clawd-keys";
@@ -61,20 +61,16 @@ async function saveToIndexedDB(
 }
 
 /**
- * Get or create an Ed25519 keypair.
- *
- * Gotcha: WebCrypto `extractable` flag applies to BOTH keys in the pair.
- * So we generate extractable, export the public key, then re-import the
- * private key as non-extractable.
+ * Get or create a keypair. Returns a stored keypair from IndexedDB if available.
+ * Note: This is kept for SDK interface compatibility. New code should use X25519 directly.
  */
 export async function getOrCreateKeypair(): Promise<StoredKeypair> {
   const cached = await loadFromIndexedDB();
   if (cached) return cached;
 
-  // Generate extractable first (both keys share the flag)
-  const temp = await crypto.subtle.generateKey("Ed25519", true, [
-    "sign",
-    "verify",
+  // Generate X25519 keypair (extractable to export public key)
+  const temp = await crypto.subtle.generateKey("X25519", true, [
+    "deriveBits",
   ]) as CryptoKeyPair;
 
   // Export public key as raw bytes (32 bytes)
@@ -86,9 +82,9 @@ export async function getOrCreateKeypair(): Promise<StoredKeypair> {
   const privateKey = await crypto.subtle.importKey(
     "pkcs8",
     privPkcs8,
-    "Ed25519",
+    "X25519",
     false, // non-extractable
-    ["sign"]
+    ["deriveBits"]
   );
 
   // Zero out exported private key material (best effort)

@@ -4,7 +4,9 @@ import (
 	"crypto/ecdh"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -21,15 +23,21 @@ type Identity struct {
 type DB struct {
 	db *sql.DB
 
-	// In-memory cache of authorized keys for zero-overhead auth on the hot path.
+	// In-memory cache of authorized X25519 keys: base64url(x25519_pub) -> username
 	authKeysMu sync.RWMutex
-	authKeys   map[string]string // public_key -> username
+	authKeys   map[string]string
 }
 
 func NewDB(path string) (*DB, error) {
 	db, err := sql.Open("sqlite3", path+"?_journal=WAL&_busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+
+	// Detect old schema (has public_key TEXT column in authorized_keys) and migrate
+	if needsMigration(db) {
+		log.Println("Migrating authorized_keys table from Ed25519 to X25519-only schema. Please re-pair your browser.")
+		db.Exec(`DROP TABLE IF EXISTS authorized_keys`)
 	}
 
 	// Create schema
@@ -42,9 +50,8 @@ func NewDB(path string) (*DB, error) {
 			PRIMARY KEY (page_slug, key)
 		);
 		CREATE TABLE IF NOT EXISTS authorized_keys (
-			public_key TEXT NOT NULL PRIMARY KEY,
+			x25519_public_key BLOB NOT NULL PRIMARY KEY,
 			username TEXT NOT NULL,
-			x25519_public_key BLOB,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 		CREATE TABLE IF NOT EXISTS agent_identity (
@@ -57,8 +64,6 @@ func NewDB(path string) (*DB, error) {
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
 
-	// Migrations: add columns/tables that may not exist in older databases
-	db.Exec(`ALTER TABLE authorized_keys ADD COLUMN x25519_public_key BLOB`) // ignore error if already exists
 	// Drop legacy pages table — pages are now directory-based on the filesystem
 	db.Exec(`DROP TABLE IF EXISTS pages`)
 
@@ -69,34 +74,62 @@ func NewDB(path string) (*DB, error) {
 	return d, nil
 }
 
+// needsMigration checks if the old Ed25519-based schema exists.
+func needsMigration(db *sql.DB) bool {
+	rows, err := db.Query(`PRAGMA table_info(authorized_keys)`)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			continue
+		}
+		if name == "public_key" {
+			return true // old Ed25519 schema detected
+		}
+	}
+	return false
+}
+
 func (d *DB) Close() error {
 	return d.db.Close()
 }
 
-// --- Authorized Keys ---
+// --- Authorized Keys (X25519) ---
 
-func (d *DB) AddAuthorizedKey(publicKey, username string) error {
+// AddAuthorizedX25519Key stores a user's X25519 public key as an authorized key.
+func (d *DB) AddAuthorizedX25519Key(x25519PubKey []byte, username string) error {
 	_, err := d.db.Exec(
-		`INSERT OR REPLACE INTO authorized_keys (public_key, username, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
-		publicKey, username,
+		`INSERT OR REPLACE INTO authorized_keys (x25519_public_key, username, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)`,
+		x25519PubKey, username,
 	)
 	if err != nil {
 		return err
 	}
-	// Reload cache
 	return d.reloadAuthKeys()
 }
 
-// IsKeyAuthorized checks the in-memory cache. Returns (username, true) if authorized.
-func (d *DB) IsKeyAuthorized(publicKey string) (string, bool) {
+// IsX25519KeyAuthorized checks the in-memory cache. Returns (username, true) if authorized.
+func (d *DB) IsX25519KeyAuthorized(keyID string) (string, bool) {
 	d.authKeysMu.RLock()
 	defer d.authKeysMu.RUnlock()
-	username, ok := d.authKeys[publicKey]
+	username, ok := d.authKeys[keyID]
 	return username, ok
 }
 
-func (d *DB) DeleteAuthorizedKey(publicKey string) error {
-	_, err := d.db.Exec(`DELETE FROM authorized_keys WHERE public_key = ?`, publicKey)
+// DeleteAuthorizedX25519Key removes an authorized key by its base64url-encoded X25519 public key.
+func (d *DB) DeleteAuthorizedX25519Key(keyID string) error {
+	keyBytes, err := base64.RawURLEncoding.DecodeString(keyID)
+	if err != nil {
+		return fmt.Errorf("invalid key_id: %w", err)
+	}
+	_, err = d.db.Exec(`DELETE FROM authorized_keys WHERE x25519_public_key = ?`, keyBytes)
 	if err != nil {
 		return err
 	}
@@ -104,7 +137,7 @@ func (d *DB) DeleteAuthorizedKey(publicKey string) error {
 }
 
 func (d *DB) reloadAuthKeys() error {
-	rows, err := d.db.Query(`SELECT public_key, username FROM authorized_keys`)
+	rows, err := d.db.Query(`SELECT x25519_public_key, username FROM authorized_keys`)
 	if err != nil {
 		return err
 	}
@@ -112,17 +145,42 @@ func (d *DB) reloadAuthKeys() error {
 
 	keys := make(map[string]string)
 	for rows.Next() {
-		var pk, user string
-		if err := rows.Scan(&pk, &user); err != nil {
+		var keyBytes []byte
+		var user string
+		if err := rows.Scan(&keyBytes, &user); err != nil {
 			return err
 		}
-		keys[pk] = user
+		keyID := base64.RawURLEncoding.EncodeToString(keyBytes)
+		keys[keyID] = user
 	}
 
 	d.authKeysMu.Lock()
 	d.authKeys = keys
 	d.authKeysMu.Unlock()
 	return nil
+}
+
+// ListAuthorizedKeys returns X25519 public keys for all authorized users.
+func (d *DB) ListAuthorizedKeys() []*ecdh.PublicKey {
+	rows, err := d.db.Query(`SELECT x25519_public_key FROM authorized_keys`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var keys []*ecdh.PublicKey
+	for rows.Next() {
+		var keyBytes []byte
+		if err := rows.Scan(&keyBytes); err != nil {
+			continue
+		}
+		pub, err := ecdh.X25519().NewPublicKey(keyBytes)
+		if err != nil {
+			continue
+		}
+		keys = append(keys, pub)
+	}
+	return keys
 }
 
 // --- Storage ---
@@ -230,50 +288,15 @@ func (d *DB) GetOrCreateIdentity() (*Identity, error) {
 	}, nil
 }
 
-// StoreUserX25519Key stores a user's X25519 public key alongside their Ed25519 key.
-func (d *DB) StoreUserX25519Key(ed25519PubKey string, x25519PubKeyBytes []byte) error {
-	_, err := d.db.Exec(
-		`UPDATE authorized_keys SET x25519_public_key = ? WHERE public_key = ?`,
-		x25519PubKeyBytes, ed25519PubKey,
-	)
-	return err
-}
-
-// ListAuthorizedKeysWithX25519 returns X25519 public keys for all authorized users that have one.
-func (d *DB) ListAuthorizedKeysWithX25519() []*ecdh.PublicKey {
-	rows, err := d.db.Query(`SELECT x25519_public_key FROM authorized_keys WHERE x25519_public_key IS NOT NULL`)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-
-	var keys []*ecdh.PublicKey
-	for rows.Next() {
-		var keyBytes []byte
-		if err := rows.Scan(&keyBytes); err != nil {
-			continue
-		}
-		pub, err := ecdh.X25519().NewPublicKey(keyBytes)
-		if err != nil {
-			continue
-		}
-		keys = append(keys, pub)
-	}
-	return keys
-}
-
-// GetUserX25519Key retrieves a user's X25519 public key by their Ed25519 public key.
-func (d *DB) GetUserX25519Key(ed25519PubKey string) (*ecdh.PublicKey, error) {
+// GetX25519KeyByPublicBytes looks up an authorized user's X25519 public key by the raw key bytes.
+func (d *DB) GetX25519KeyByPublicBytes(x25519PubBytes []byte) (*ecdh.PublicKey, error) {
 	var keyBytes []byte
 	err := d.db.QueryRow(
-		`SELECT x25519_public_key FROM authorized_keys WHERE public_key = ?`,
-		ed25519PubKey,
+		`SELECT x25519_public_key FROM authorized_keys WHERE x25519_public_key = ?`,
+		x25519PubBytes,
 	).Scan(&keyBytes)
 	if err != nil {
 		return nil, err
-	}
-	if keyBytes == nil {
-		return nil, sql.ErrNoRows
 	}
 	return ecdh.X25519().NewPublicKey(keyBytes)
 }

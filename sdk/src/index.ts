@@ -1,9 +1,8 @@
 /**
  * ClawdStorage — zero-trust client for yourbro agent-scoped storage.
  *
- * Every request is signed with the user's Ed25519 keypair via RFC 9421
- * HTTP Message Signatures. The server (yourbro.ai) is an untrusted broker
- * and never handles auth material.
+ * All requests are E2E encrypted via X25519 ECDH + HKDF-SHA256 + AES-256-GCM.
+ * The server (yourbro.ai) is an untrusted relay and never sees plaintext data.
  */
 import { getOrCreateKeypair, base64RawUrlEncode, base64StdEncode } from "./crypto.js";
 
@@ -15,8 +14,7 @@ function getMeta(name: string): string {
 /**
  * Wait for the parent window to send the keypair via postMessage.
  * The page host template loads the keypair from IndexedDB (main origin)
- * and relays it here because sandboxed iframes (no allow-same-origin)
- * cannot access IndexedDB.
+ * and relays it here because sandboxed iframes cannot access IndexedDB.
  */
 interface ReceivedKeys {
   privateKey: CryptoKey;
@@ -54,11 +52,9 @@ export class ClawdStorage {
   private pageSlug: string;
   private agentId: string;
   private apiBase: string;
-  private cachedPrivateKey: CryptoKey | null = null;
   private cachedPubKeyB64: string | null = null;
   private initPromise: Promise<void> | null = null;
   // E2E encryption state
-  private x25519PrivateKey: CryptoKey | null = null;
   private aesKey: CryptoKey | null = null;
 
   // JWT token extracted from iframe URL for authenticating relay requests
@@ -90,36 +86,27 @@ export class ClawdStorage {
   }
 
   private async ensureKeys(): Promise<void> {
-    if (this.cachedPrivateKey) return;
+    if (this.aesKey) return;
     if (this.initPromise) return this.initPromise;
     this.initPromise = (async () => {
-      // In a sandboxed iframe, receive keypair from parent via postMessage.
-      // Falls back to IndexedDB for non-sandboxed contexts.
-      let privateKey: CryptoKey;
       let publicKeyBytes: Uint8Array;
       try {
         if (window.parent !== window) {
           // We're in an iframe — wait for parent to send keypair
           const kp = await waitForKeypair();
-          privateKey = kp.privateKey;
           publicKeyBytes = kp.publicKeyBytes;
           // Capture X25519 keys for E2E encryption
           if (kp.x25519PrivateKey && kp.agentX25519PublicKeyBytes) {
-            this.x25519PrivateKey = kp.x25519PrivateKey;
             await this.deriveAesKey(kp.x25519PrivateKey, kp.agentX25519PublicKeyBytes);
           }
         } else {
           const kp = await getOrCreateKeypair();
-          privateKey = kp.privateKey;
           publicKeyBytes = kp.publicKeyBytes;
         }
       } catch {
-        // Fallback to IndexedDB (works if same-origin)
         const kp = await getOrCreateKeypair();
-        privateKey = kp.privateKey;
         publicKeyBytes = kp.publicKeyBytes;
       }
-      this.cachedPrivateKey = privateKey;
       this.cachedPubKeyB64 = base64RawUrlEncode(publicKeyBytes);
     })();
     return this.initPromise;
@@ -220,54 +207,13 @@ export class ClawdStorage {
   ): Promise<Response> {
     await this.ensureKeys();
 
-    // Build the inner relay request with RFC 9421 signatures
-    const url = `https://relay.internal${path}`;
-    const created = Math.floor(Date.now() / 1000);
-    const nonce = crypto.randomUUID();
-
-    let contentDigest = "";
-    if (body) {
-      const hash = await crypto.subtle.digest(
-        "SHA-256",
-        new TextEncoder().encode(body)
-      );
-      contentDigest = `sha-256=:${base64StdEncode(new Uint8Array(hash))}:`;
-    }
-
-    const coveredComponents = body
-      ? '("@method" "@target-uri" "content-digest")'
-      : '("@method" "@target-uri")';
-    const sigParams = `${coveredComponents};created=${created};nonce="${nonce}";keyid="${this.cachedPubKeyB64}"`;
-
-    const lines: string[] = [
-      `"@method": ${method}`,
-      `"@target-uri": ${url}`,
-    ];
-    if (contentDigest) lines.push(`"content-digest": ${contentDigest}`);
-    lines.push(`"@signature-params": ${sigParams}`);
-    const signatureBase = lines.join("\n");
-
-    const sig = await crypto.subtle.sign(
-      "Ed25519",
-      this.cachedPrivateKey!,
-      new TextEncoder().encode(signatureBase)
-    );
-    const sigB64 = base64StdEncode(new Uint8Array(sig));
-
-    const reqHeaders: Record<string, string> = {
-      "Content-Type": "application/json",
-      "Signature-Input": `sig1=${sigParams}`,
-      "Signature": `sig1=:${sigB64}:`,
-    };
-    if (contentDigest) reqHeaders["Content-Digest"] = contentDigest;
-
-    const innerReq = {
+    const innerReq: Record<string, unknown> = {
       id: crypto.randomUUID(),
       method,
       path,
-      headers: reqHeaders,
-      body: body || null,
+      headers: { "Content-Type": "application/json" },
     };
+    if (body) innerReq.body = body;
 
     // Build the outgoing relay envelope
     let envelope: Record<string, unknown>;
@@ -275,9 +221,14 @@ export class ClawdStorage {
       // E2E: encrypt the inner request
       const plaintext = new TextEncoder().encode(JSON.stringify(innerReq));
       const encrypted = await this.encrypt(plaintext);
-      envelope = { id: innerReq.id, encrypted: true, payload: base64StdEncode(encrypted) };
+      envelope = {
+        id: innerReq.id,
+        encrypted: true,
+        key_id: this.cachedPubKeyB64,
+        payload: base64StdEncode(encrypted),
+      };
     } else {
-      // Cleartext: send inner request as-is
+      // No E2E key available — send as cleartext (pairing may not be complete)
       envelope = innerReq;
     }
 

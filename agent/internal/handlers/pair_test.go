@@ -10,13 +10,22 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	mw "github.com/mehanig/yourbro/agent/internal/middleware"
-	"github.com/mehanig/yourbro/agent/internal/testutil"
+	"github.com/mehanig/yourbro/agent/internal/storage"
 )
+
+func newTestDB(t *testing.T) *storage.DB {
+	t.Helper()
+	db, err := storage.NewDB(":memory:")
+	if err != nil {
+		t.Fatalf("NewDB(:memory:): %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
 
 func newPairHandler(t *testing.T) (*PairHandler, *chi.Mux) {
 	t.Helper()
-	db := testutil.NewTestDB(t)
+	db := newTestDB(t)
 	h := &PairHandler{
 		DB:            db,
 		PairingCode:   "TESTCODE",
@@ -24,26 +33,29 @@ func newPairHandler(t *testing.T) (*PairHandler, *chi.Mux) {
 	}
 	r := chi.NewRouter()
 	r.Post("/api/pair", h.Pair)
-	// Key revocation route (protected by signature verification)
-	r.Route("/api/keys", func(r chi.Router) {
-		r.Use(mw.VerifyUserSignature(db))
-		r.Delete("/", h.RevokeKey)
-	})
+	r.Post("/api/revoke-key", h.RevokeKey)
 	return h, r
 }
 
-func validPairBody(pubKey string) string {
-	return `{"pairing_code":"TESTCODE","user_public_key":"` + pubKey + `","username":"alice"}`
+func testX25519Key(t *testing.T) ([]byte, string) {
+	t.Helper()
+	key := make([]byte, 32)
+	key[0] = byte(t.Name()[0]) // vary per test
+	keyID := base64.RawURLEncoding.EncodeToString(key)
+	return key, keyID
+}
+
+func validPairBody(x25519PubB64 string) string {
+	return `{"pairing_code":"TESTCODE","user_x25519_public_key":"` + x25519PubB64 + `","username":"alice"}`
 }
 
 // --- Pairing Tests ---
 
 func TestPair_Success(t *testing.T) {
 	h, router := newPairHandler(t)
-	pub, _ := testutil.TestKeypair(t)
-	pubB64 := testutil.KeyID(pub)
+	_, keyID := testX25519Key(t)
 
-	body := validPairBody(pubB64)
+	body := validPairBody(keyID)
 	req := httptest.NewRequest("POST", "/api/pair", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -60,7 +72,7 @@ func TestPair_Success(t *testing.T) {
 	}
 
 	// Key should be stored
-	username, ok := h.DB.IsKeyAuthorized(pubB64)
+	username, ok := h.DB.IsX25519KeyAuthorized(keyID)
 	if !ok {
 		t.Fatal("key should be authorized after pairing")
 	}
@@ -71,10 +83,9 @@ func TestPair_Success(t *testing.T) {
 
 func TestPair_WrongCode(t *testing.T) {
 	_, router := newPairHandler(t)
-	pub, _ := testutil.TestKeypair(t)
-	pubB64 := testutil.KeyID(pub)
+	_, keyID := testX25519Key(t)
 
-	body := `{"pairing_code":"WRONGCODE","user_public_key":"` + pubB64 + `","username":"alice"}`
+	body := `{"pairing_code":"WRONGCODE","user_x25519_public_key":"` + keyID + `","username":"alice"}`
 	req := httptest.NewRequest("POST", "/api/pair", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -86,9 +97,8 @@ func TestPair_WrongCode(t *testing.T) {
 
 func TestPair_AlreadyUsed(t *testing.T) {
 	_, router := newPairHandler(t)
-	pub, _ := testutil.TestKeypair(t)
-	pubB64 := testutil.KeyID(pub)
-	body := validPairBody(pubB64)
+	_, keyID := testX25519Key(t)
+	body := validPairBody(keyID)
 
 	// First pairing succeeds
 	req1 := httptest.NewRequest("POST", "/api/pair", strings.NewReader(body))
@@ -108,7 +118,7 @@ func TestPair_AlreadyUsed(t *testing.T) {
 }
 
 func TestPair_Expired(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db := newTestDB(t)
 	h := &PairHandler{
 		DB:            db,
 		PairingCode:   "TESTCODE",
@@ -117,8 +127,8 @@ func TestPair_Expired(t *testing.T) {
 	r := chi.NewRouter()
 	r.Post("/api/pair", h.Pair)
 
-	pub, _ := testutil.TestKeypair(t)
-	body := validPairBody(testutil.KeyID(pub))
+	_, keyID := testX25519Key(t)
+	body := validPairBody(keyID)
 	req := httptest.NewRequest("POST", "/api/pair", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -130,10 +140,9 @@ func TestPair_Expired(t *testing.T) {
 
 func TestPair_RateLimit(t *testing.T) {
 	_, router := newPairHandler(t)
-	pub, _ := testutil.TestKeypair(t)
-	pubB64 := testutil.KeyID(pub)
+	_, keyID := testX25519Key(t)
 
-	wrongBody := `{"pairing_code":"WRONG","user_public_key":"` + pubB64 + `","username":"alice"}`
+	wrongBody := `{"pairing_code":"WRONG","user_x25519_public_key":"` + keyID + `","username":"alice"}`
 
 	// Send 5 wrong attempts
 	for i := 0; i < 5; i++ {
@@ -146,7 +155,7 @@ func TestPair_RateLimit(t *testing.T) {
 	}
 
 	// 6th attempt (even with correct code) should be rate limited
-	correctBody := validPairBody(pubB64)
+	correctBody := validPairBody(keyID)
 	req := httptest.NewRequest("POST", "/api/pair", strings.NewReader(correctBody))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -167,7 +176,7 @@ func TestPair_InvalidJSON(t *testing.T) {
 
 func TestPair_InvalidPublicKey_BadBase64(t *testing.T) {
 	_, router := newPairHandler(t)
-	body := `{"pairing_code":"TESTCODE","user_public_key":"not-valid!!!","username":"alice"}`
+	body := `{"pairing_code":"TESTCODE","user_x25519_public_key":"not-valid!!!","username":"alice"}`
 	req := httptest.NewRequest("POST", "/api/pair", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -179,7 +188,7 @@ func TestPair_InvalidPublicKey_BadBase64(t *testing.T) {
 func TestPair_InvalidPublicKey_WrongLength(t *testing.T) {
 	_, router := newPairHandler(t)
 	shortKey := base64.RawURLEncoding.EncodeToString(make([]byte, 16))
-	body := `{"pairing_code":"TESTCODE","user_public_key":"` + shortKey + `","username":"alice"}`
+	body := `{"pairing_code":"TESTCODE","user_x25519_public_key":"` + shortKey + `","username":"alice"}`
 	req := httptest.NewRequest("POST", "/api/pair", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -190,9 +199,8 @@ func TestPair_InvalidPublicKey_WrongLength(t *testing.T) {
 
 func TestPair_EmptyUsername(t *testing.T) {
 	_, router := newPairHandler(t)
-	pub, _ := testutil.TestKeypair(t)
-	pubB64 := testutil.KeyID(pub)
-	body := `{"pairing_code":"TESTCODE","user_public_key":"` + pubB64 + `","username":""}`
+	_, keyID := testX25519Key(t)
+	body := `{"pairing_code":"TESTCODE","user_x25519_public_key":"` + keyID + `","username":""}`
 	req := httptest.NewRequest("POST", "/api/pair", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -205,11 +213,10 @@ func TestPair_EmptyUsername(t *testing.T) {
 
 func TestRevokeKey_Success(t *testing.T) {
 	h, router := newPairHandler(t)
-	pub, priv := testutil.TestKeypair(t)
-	pubB64 := testutil.KeyID(pub)
+	_, keyID := testX25519Key(t)
 
 	// First pair
-	body := validPairBody(pubB64)
+	body := validPairBody(keyID)
 	req := httptest.NewRequest("POST", "/api/pair", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -217,9 +224,9 @@ func TestRevokeKey_Success(t *testing.T) {
 		t.Fatalf("pair: want 200, got %d", w.Code)
 	}
 
-	// Now revoke via signed DELETE
-	delReq := httptest.NewRequest("DELETE", "http://localhost/api/keys", nil)
-	testutil.SignRequest(delReq, priv, pub)
+	// Now revoke via POST with X-Yourbro-Key-ID header
+	delReq := httptest.NewRequest("POST", "/api/revoke-key", nil)
+	delReq.Header.Set("X-Yourbro-Key-ID", keyID)
 	delW := httptest.NewRecorder()
 	router.ServeHTTP(delW, delReq)
 	if delW.Code != http.StatusOK {
@@ -227,40 +234,18 @@ func TestRevokeKey_Success(t *testing.T) {
 	}
 
 	// Key should be gone
-	if _, ok := h.DB.IsKeyAuthorized(pubB64); ok {
+	if _, ok := h.DB.IsX25519KeyAuthorized(keyID); ok {
 		t.Fatal("key should be removed after revocation")
 	}
 }
 
-func TestRevokeKey_SubsequentAccessDenied(t *testing.T) {
+func TestRevokeKey_MissingKeyID(t *testing.T) {
 	_, router := newPairHandler(t)
-	pub, priv := testutil.TestKeypair(t)
-	pubB64 := testutil.KeyID(pub)
 
-	// Pair
-	body := validPairBody(pubB64)
-	req := httptest.NewRequest("POST", "/api/pair", strings.NewReader(body))
+	req := httptest.NewRequest("POST", "/api/revoke-key", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("pair: want 200, got %d", w.Code)
-	}
-
-	// Revoke
-	delReq := httptest.NewRequest("DELETE", "http://localhost/api/keys", nil)
-	testutil.SignRequest(delReq, priv, pub)
-	delW := httptest.NewRecorder()
-	router.ServeHTTP(delW, delReq)
-	if delW.Code != http.StatusOK {
-		t.Fatalf("revoke: want 200, got %d", delW.Code)
-	}
-
-	// Attempt another signed request — should be rejected (403)
-	req2 := httptest.NewRequest("DELETE", "http://localhost/api/keys", nil)
-	testutil.SignRequest(req2, priv, pub)
-	w2 := httptest.NewRecorder()
-	router.ServeHTTP(w2, req2)
-	if w2.Code != http.StatusForbidden {
-		t.Fatalf("after revoke: want 403, got %d: %s", w2.Code, w2.Body.String())
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d: %s", w.Code, w.Body.String())
 	}
 }

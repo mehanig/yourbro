@@ -72,7 +72,7 @@ export function renderLogin(container: HTMLElement) {
           </div>
           <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;">
             <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">Cryptographic Security</h3>
-            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Ed25519 signatures, RFC 9421 HTTP message signing, X25519 key exchange, and E2E encrypted relay.</p>
+            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">X25519 key exchange, AES-256-GCM encryption, and E2E encrypted relay.</p>
           </div>
           <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;">
             <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">Built for ClawdBot</h3>

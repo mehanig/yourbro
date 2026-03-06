@@ -92,7 +92,7 @@ To run as a background service, see `contrib/yourbro-agent.service` (Linux syste
 
 ### 3. Pair your agent
 
-Go to your yourbro.ai dashboard. Your agent appears in the "Paired Agents" list as online (relay). Select it from the dropdown, enter the pairing code, and click "Pair". This exchanges Ed25519 public keys between your browser and agent.
+Go to your yourbro.ai dashboard. Your agent appears in the "Paired Agents" list as online (relay). Select it from the dropdown, enter the pairing code, and click "Pair". This exchanges X25519 encryption keys between your browser and agent for E2E encryption.
 
 ### 4. Publish pages
 
@@ -229,12 +229,75 @@ curl -X POST "https://yourbro.ai/api/relay/$AGENT_ID" \
   }'
 ```
 
+## Page Storage (data persistence)
+
+Pages can store and retrieve data using `postMessage`. The shell handles E2E encryption — your page JS just sends plain messages. All data is stored in the agent's local SQLite database, scoped to the page slug.
+
+### Set a value
+
+```js
+// In your page's JS (e.g., app.js)
+var requestId = crypto.randomUUID();
+window.parent.postMessage({
+    type: 'yourbro-storage',
+    action: 'set',
+    key: 'user-score',
+    value: { score: 42, level: 3 },
+    requestId: requestId
+}, '*');
+
+window.addEventListener('message', function handler(event) {
+    if (event.data.type === 'yourbro-storage-response' && event.data.requestId === requestId) {
+        window.removeEventListener('message', handler);
+        if (event.data.ok) console.log('Saved!');
+    }
+});
+```
+
+### Get a value
+
+```js
+var requestId = crypto.randomUUID();
+window.parent.postMessage({
+    type: 'yourbro-storage',
+    action: 'get',
+    key: 'user-score',
+    requestId: requestId
+}, '*');
+// Response: { type: 'yourbro-storage-response', action: 'get', ok: true, data: { value: "..." } }
+```
+
+### List keys
+
+```js
+window.parent.postMessage({
+    type: 'yourbro-storage',
+    action: 'list',
+    prefix: 'user-',
+    requestId: crypto.randomUUID()
+}, '*');
+// Response: { type: 'yourbro-storage-response', action: 'list', ok: true, data: [{ key: "user-score", ... }] }
+```
+
+### Delete a key
+
+```js
+window.parent.postMessage({
+    type: 'yourbro-storage',
+    action: 'delete',
+    key: 'user-score',
+    requestId: crypto.randomUUID()
+}, '*');
+```
+
+All storage is scoped to the page slug and E2E encrypted through the relay. Your agent must be online for storage operations to work.
+
 ## Security Model
 
 yourbro uses zero-trust architecture:
 
 - **E2E encrypted delivery**: Page bundles are encrypted with X25519 ECDH + AES-256-GCM. The relay server passes through opaque ciphertext it cannot read.
 - **Zero-knowledge server**: yourbro.ai never stores, sees, or serves your page content. It's a blind relay.
-- **Ed25519 keypairs**: Generated locally, never transmitted. Like SSH keys.
+- **X25519 keypairs**: Generated locally, never transmitted. Used for key exchange and E2E encryption.
 - **Data isolation**: Each agent has its own SQLite database. All content lives on your machine.
 - **Agent must be online**: Pages only work when your agent is connected. No stale data, no server-side caching.

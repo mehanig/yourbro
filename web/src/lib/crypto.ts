@@ -1,20 +1,12 @@
 /**
- * Ed25519 keypair management for the main (parent) origin.
- * Mirrors sdk/src/crypto.ts but lives in the web app so the dashboard
- * can generate/load keys and the page host template can relay them to
- * sandboxed iframes via postMessage.
+ * X25519 keypair management for E2E encryption.
+ * Keys are stored in IndexedDB and never leave the browser.
  */
 
 const DB_NAME = "clawd-keys";
-const STORE_NAME = "keypair";
 const X25519_STORE = "x25519";
 const AGENT_KEYS_STORE = "agent-keys";
 const KEY_ID = "default";
-
-export interface StoredKeypair {
-  privateKey: CryptoKey;
-  publicKeyBytes: Uint8Array;
-}
 
 export interface StoredX25519Keypair {
   privateKey: CryptoKey;
@@ -26,8 +18,9 @@ function openDB(): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, 2);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
+      // Legacy store — keep for schema version compatibility but no longer used
+      if (!db.objectStoreNames.contains("keypair")) {
+        db.createObjectStore("keypair");
       }
       if (!db.objectStoreNames.contains(X25519_STORE)) {
         db.createObjectStore(X25519_STORE);
@@ -42,71 +35,10 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 /**
- * Get or create an Ed25519 keypair.
- * WebCrypto `extractable` flag applies to BOTH keys in the pair, so we
- * generate extractable, export the public key, then re-import the private
- * key as non-extractable.
+ * Get or create an X25519 keypair for E2E encryption.
  *
  * Uses a single readwrite transaction to check-then-create atomically,
- * preventing a TOCTOU race across browser tabs where two tabs could both
- * read "no keypair" and generate different keypairs.
- */
-export async function getOrCreateKeypair(): Promise<StoredKeypair> {
-  const db = await openDB();
-
-  // Attempt atomic read inside a readwrite transaction to hold the lock
-  const existing = await new Promise<StoredKeypair | null>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    const req = store.get(KEY_ID);
-    req.onsuccess = () => resolve(req.result as StoredKeypair | null);
-    req.onerror = () => reject(req.error);
-  });
-  if (existing) return existing;
-
-  // No keypair exists — generate one
-  const temp = (await crypto.subtle.generateKey("Ed25519", true, [
-    "sign",
-    "verify",
-  ])) as CryptoKeyPair;
-
-  const pubRaw = await crypto.subtle.exportKey("raw", temp.publicKey);
-  const publicKeyBytes = new Uint8Array(pubRaw);
-
-  const privPkcs8 = await crypto.subtle.exportKey("pkcs8", temp.privateKey);
-  const privateKey = await crypto.subtle.importKey(
-    "pkcs8",
-    privPkcs8,
-    "Ed25519",
-    false,
-    ["sign"]
-  );
-
-  new Uint8Array(privPkcs8).fill(0);
-
-  // Re-check and save in a single readwrite transaction (double-check pattern)
-  return new Promise<StoredKeypair>((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    const checkReq = store.get(KEY_ID);
-    checkReq.onsuccess = () => {
-      if (checkReq.result) {
-        // Another tab won the race — use their keypair
-        resolve(checkReq.result as StoredKeypair);
-        return;
-      }
-      // We won — store ours
-      store.put({ privateKey, publicKeyBytes }, KEY_ID);
-    };
-    checkReq.onerror = () => reject(checkReq.error);
-    tx.oncomplete = () => resolve({ privateKey, publicKeyBytes });
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-/**
- * Get or create an X25519 keypair for E2E encryption.
- * Separate from Ed25519 (signing ≠ encryption).
+ * preventing a TOCTOU race across browser tabs.
  */
 export async function getOrCreateX25519Keypair(): Promise<StoredX25519Keypair> {
   const db = await openDB();
@@ -196,4 +128,3 @@ export function base64RawUrlEncode(bytes: Uint8Array): string {
 export function base64StdEncode(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes));
 }
-
