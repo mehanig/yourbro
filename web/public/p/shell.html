@@ -65,26 +65,31 @@
             }
 
             // 3. Load E2E keys from IndexedDB (stored by dashboard pairing flow)
-            var x25519kp = null;
+            var x25519Private = null; // CryptoKey
+            var x25519PubBytes = null; // Uint8Array
             var agentX25519Keys = {};
             try {
                 var db = await new Promise(function(res, rej) {
-                    var req = indexedDB.open('clawd-keys', 2);
+                    var req = indexedDB.open('clawd-keys', 3);
                     req.onupgradeneeded = function() {
                         var d = req.result;
-                        if (!d.objectStoreNames.contains('keypair')) d.createObjectStore('keypair');
-                        if (!d.objectStoreNames.contains('x25519')) d.createObjectStore('x25519');
-                        if (!d.objectStoreNames.contains('agent-keys')) d.createObjectStore('agent-keys');
+                        for (var n of Array.from(d.objectStoreNames)) d.deleteObjectStore(n);
+                        d.createObjectStore('x25519');
+                        d.createObjectStore('agent-keys');
                     };
                     req.onsuccess = function() { res(req.result); };
                     req.onerror = function() { rej(req.error); };
                 });
-                x25519kp = await new Promise(function(res, rej) {
+                var stored = await new Promise(function(res, rej) {
                     var tx = db.transaction('x25519', 'readonly');
                     var req = tx.objectStore('x25519').get('default');
                     req.onsuccess = function() { res(req.result || null); };
                     req.onerror = function() { rej(req.error); };
                 });
+                if (stored && stored.pk && stored.pub) {
+                    x25519Private = await crypto.subtle.importKey('pkcs8', stored.pk.buffer, 'X25519', false, ['deriveBits']);
+                    x25519PubBytes = stored.pub;
+                }
                 for (var i = 0; i < agentIds.length; i++) {
                     try {
                         var k = await new Promise(function(res, rej) {
@@ -102,7 +107,7 @@
             // Find first agent with X25519 key exchange completed
             var e2eAgentId = null;
             var aesKey = null;
-            if (x25519kp) {
+            if (x25519Private) {
                 for (var i = 0; i < agentIds.length; i++) {
                     if (agentX25519Keys[agentIds[i]]) {
                         try {
@@ -110,7 +115,7 @@
                                 'raw', agentX25519Keys[agentIds[i]], 'X25519', true, []
                             );
                             var shared = await crypto.subtle.deriveBits(
-                                { name: 'X25519', public: agentPub }, x25519kp.privateKey, 256
+                                { name: 'X25519', public: agentPub }, x25519Private, 256
                             );
                             var hkdfKey = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
                             aesKey = await crypto.subtle.deriveKey(
@@ -136,9 +141,9 @@
 
             // User's X25519 public key as base64url — sent as key_id so agent knows which key to decrypt with
             var userKeyId = '';
-            if (x25519kp && x25519kp.publicKeyBytes) {
+            if (x25519PubBytes) {
                 var s = '';
-                for (var i = 0; i < x25519kp.publicKeyBytes.length; i++) s += String.fromCharCode(x25519kp.publicKeyBytes[i]);
+                for (var i = 0; i < x25519PubBytes.length; i++) s += String.fromCharCode(x25519PubBytes[i]);
                 userKeyId = btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
             }
 
