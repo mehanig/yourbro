@@ -47,7 +47,7 @@ Your agent (yourbro-agent) runs on your machine and serves pages from local dire
 
 The agent connects to yourbro.ai via an outbound WebSocket — no exposed ports, no DNS, no TLS certificates needed.
 
-## Setup (Relay Mode — Recommended)
+## Setup
 
 ### 1. Get a yourbro API token
 
@@ -298,6 +298,6 @@ yourbro uses zero-trust architecture:
 
 - **E2E encrypted delivery**: Page bundles are encrypted with X25519 ECDH + AES-256-GCM. The relay server passes through opaque ciphertext it cannot read.
 - **Zero-knowledge server**: yourbro.ai never stores, sees, or serves your page content. It's a blind relay.
-- **X25519 keypairs**: Generated locally, never transmitted. Used for key exchange and E2E encryption.
+- **X25519 keypairs**: Generated locally. Private keys never leave your device. Public keys are exchanged during pairing for E2E encryption.
 - **Data isolation**: Each agent has its own SQLite database. All content lives on your machine.
 - **Agent must be online**: Pages only work when your agent is connected. No stale data, no server-side caching.
