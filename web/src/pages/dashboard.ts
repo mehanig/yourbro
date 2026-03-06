@@ -323,8 +323,9 @@ function bindPairHandlers(agents: Agent[], user: User, container: HTMLElement) {
           return;
         }
 
-        // Store agent's X25519 key
-        const pairResp = await res.json().catch(() => ({}));
+        // Store agent's X25519 key (relay wraps agent response in envelope with body as string)
+        const relayResp = await res.json();
+        const pairResp = relayResp.body ? JSON.parse(relayResp.body) : relayResp;
         if (pairResp.agent_x25519_public_key) {
           const agentX25519Bytes = base64RawUrlDecode(pairResp.agent_x25519_public_key);
           await storeAgentX25519Key(agentId, agentX25519Bytes);
