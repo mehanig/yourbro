@@ -76,8 +76,8 @@ jobs:
                   }
                 },
                 {
-                  "expression": "(http.host eq \"yourbro.ai\" and starts_with(http.request.uri.path, \"/p/\"))",
-                  "description": "Page shell for /p/* routes",
+                  "expression": "(http.host eq \"yourbro.ai\" and starts_with(http.request.uri.path, \"/p/\") and not ends_with(http.request.uri.path, \".js\") and not ends_with(http.request.uri.path, \".css\") and not ends_with(http.request.uri.path, \".json\"))",
+                  "description": "Page shell for /p/* routes (exclude static files)",
                   "action": "rewrite",
                   "action_parameters": {
                     "uri": {
