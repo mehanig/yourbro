@@ -40,10 +40,10 @@ Publish thin HTML pages to yourbro.ai with zero-trust, agent-backed storage. You
 ## How It Works
 
 ```
-ClawdBot publishes page via relay -> your agent stores it locally -> visitor loads page -> yourbro.ai fetches HTML from your agent -> SDK in page fetches data from your agent -> displayed in browser
+ClawdBot writes HTML file to /data/yourbro/pages/{slug}.html -> registers via internal API -> visitor loads page -> yourbro.ai fetches HTML from your agent (read from disk) -> SDK in page fetches data from your agent -> displayed in browser
 ```
 
-Your agent (yourbro-agent) runs on your machine and stores everything (pages + data) in its own SQLite database. yourbro.ai is a pure relay — it never stores, sees, or serves your content. Pages only work when your agent is online.
+Your agent (yourbro-agent) runs on your machine and serves pages from local files. yourbro.ai is a pure relay — it never stores, sees, or serves your content. Pages only work when your agent is online. Editing the HTML file on disk takes effect immediately — no re-registration needed.
 
 The agent connects to yourbro.ai via an outbound WebSocket — no exposed ports, no DNS, no TLS certificates needed.
 
@@ -99,10 +99,11 @@ Go to your yourbro.ai dashboard. Your agent appears in the "Paired Agents" list 
 Ask your ClawdBot to publish a page. It will use this skill to:
 
 1. Generate HTML content
-2. Store the page on your agent via relay (`PUT /api/page/{slug}`)
-3. The page goes live at `https://yourbro.ai/p/USERNAME/SLUG`
+2. Write the file to `/data/yourbro/pages/{slug}.html`
+3. Register via internal API: `curl -X PUT localhost:19200/page/{slug} -H "X-YourBro-Internal-Key: $(cat /data/yourbro/internal.key)" -d '{"title":"..."}'`
+4. The page goes live at `https://yourbro.ai/p/USERNAME/SLUG`
 
-Pages are served on-demand from your agent. If the agent is offline, visitors see an "agent offline" message.
+To update a page, just edit the HTML file — changes are live immediately (no API call needed). Pages are served on-demand from your agent. If the agent is offline, visitors see an "agent offline" message.
 
 ## Configuration
 
@@ -111,8 +112,9 @@ Pages are served on-demand from your agent. If the agent is offline, visitors se
 | `YOURBRO_TOKEN` | Yes | -- | API token from yourbro.ai dashboard (used by both ClawdBot and the agent) |
 | `YOURBRO_SERVER_URL` | Yes | -- | yourbro server URL (e.g., `https://yourbro.ai`) |
 | `SQLITE_PATH` | No | `~/.yourbro/agent.db` | SQLite database path |
+| `YOURBRO_INTERNAL_KEY` | No | Auto-generated | Internal API key, auto-generated at `/data/yourbro/internal.key` |
 
-Two env vars (`YOURBRO_TOKEN` + `YOURBRO_SERVER_URL`) are all you need.
+Two env vars (`YOURBRO_TOKEN` + `YOURBRO_SERVER_URL`) are all you need. The internal API key is auto-generated on first startup.
 
 ## Usage
 
@@ -134,43 +136,38 @@ When the user asks you to publish a page or create a web page on yourbro:
    await storage.set("counter", 42);
    ```
 
-4. **Publish the page via relay** (stores on your agent, not the server):
+4. **Write the HTML file** to `/data/yourbro/pages/{slug}.html`:
    ```bash
-   curl -X POST "https://yourbro.ai/api/relay/AGENT_ID" \
-     -H "Authorization: Bearer $YOURBRO_TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "id": "'"$(uuidgen)"'",
-       "method": "PUT",
-       "path": "/api/page/my-page",
-       "headers": {"Content-Type": "application/json"},
-       "body": "{\"title\": \"My Page\", \"html_content\": \"<html>...</html>\"}"
-     }'
+   cat > /data/yourbro/pages/my-page.html << 'EOF'
+   <!DOCTYPE html><html><body><h1>My Page</h1></body></html>
+   EOF
    ```
-   Replace `AGENT_ID` with your agent's ID.
 
-5. **Share the URL**: `https://yourbro.ai/p/USERNAME/SLUG`
+5. **Register the page** via internal API:
+   ```bash
+   curl -X PUT localhost:19200/page/my-page \
+     -H "X-YourBro-Internal-Key: $(cat /data/yourbro/internal.key)" \
+     -H "Content-Type: application/json" \
+     -d '{"title": "My Page"}'
+   ```
+
+6. **Share the URL**: `https://yourbro.ai/p/USERNAME/SLUG`
 
 ## Examples
 
 ### Simple static page
 
 ```bash
-# Get agent ID
-AGENT_ID=$(curl -s https://yourbro.ai/api/agents \
-  -H "Authorization: Bearer $YOURBRO_TOKEN" | jq '.[0].id')
+# Write the HTML file
+cat > /data/yourbro/pages/hello.html << 'EOF'
+<!DOCTYPE html><html><body><h1>Hello from yourbro!</h1></body></html>
+EOF
 
-# Publish via relay to agent
-curl -X POST "https://yourbro.ai/api/relay/$AGENT_ID" \
-  -H "Authorization: Bearer $YOURBRO_TOKEN" \
+# Register it
+curl -X PUT localhost:19200/page/hello \
+  -H "X-YourBro-Internal-Key: $(cat /data/yourbro/internal.key)" \
   -H "Content-Type: application/json" \
-  -d '{
-    "id": "'"$(uuidgen)"'",
-    "method": "PUT",
-    "path": "/api/page/hello",
-    "headers": {"Content-Type": "application/json"},
-    "body": "{\"title\": \"Hello World\", \"html_content\": \"<!DOCTYPE html><html><body><h1>Hello from yourbro!</h1></body></html>\"}"
-  }'
+  -d '{"title": "Hello World"}'
 ```
 
 Page is live at: `https://yourbro.ai/p/USERNAME/hello`
@@ -197,35 +194,33 @@ await storage.delete("old-key");
 
 ### Update an existing page
 
-Same as publishing — `PUT /api/page/{slug}` creates or updates:
+Just edit the HTML file — changes are live immediately:
 
 ```bash
-curl -X POST "https://yourbro.ai/api/relay/$AGENT_ID" \
-  -H "Authorization: Bearer $YOURBRO_TOKEN" \
+cat > /data/yourbro/pages/hello.html << 'EOF'
+<!DOCTYPE html><html><body><h1>Updated content!</h1></body></html>
+EOF
+```
+
+No API call needed. To update the title, re-register:
+
+```bash
+curl -X PUT localhost:19200/page/hello \
+  -H "X-YourBro-Internal-Key: $(cat /data/yourbro/internal.key)" \
   -H "Content-Type: application/json" \
-  -d '{
-    "id": "'"$(uuidgen)"'",
-    "method": "PUT",
-    "path": "/api/page/hello",
-    "headers": {"Content-Type": "application/json"},
-    "body": "{\"title\": \"Updated Title\", \"html_content\": \"<html>...new content...</html>\"}"
-  }'
+  -d '{"title": "Updated Title"}'
 ```
 
 ### Delete a page
 
 ```bash
-curl -X POST "https://yourbro.ai/api/relay/$AGENT_ID" \
-  -H "Authorization: Bearer $YOURBRO_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "'"$(uuidgen)"'",
-    "method": "DELETE",
-    "path": "/api/page/hello"
-  }'
+curl -X DELETE localhost:19200/page/hello \
+  -H "X-YourBro-Internal-Key: $(cat /data/yourbro/internal.key)"
 ```
 
-### List pages
+Note: this only unregisters the page. The HTML file remains on disk — delete it manually if needed.
+
+### List pages (via relay)
 
 ```bash
 curl -X POST "https://yourbro.ai/api/relay/$AGENT_ID" \

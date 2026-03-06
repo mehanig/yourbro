@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 
 	"github.com/mehanig/yourbro/agent/internal/e2e"
 	"github.com/mehanig/yourbro/agent/internal/storage"
@@ -105,7 +106,26 @@ func (r *Router) getUserCipher() (*e2e.Cipher, error) {
 	return r.CipherCache.Get(keys[0])
 }
 
+// allowedRelayPrefixes defines which paths the relay is allowed to forward.
+// Everything else is rejected — internal/admin routes must not be reachable via relay.
+var allowedRelayPrefixes = []string{"/api/", "/health"}
+
+func isRelayPathAllowed(path string) bool {
+	for _, prefix := range allowedRelayPrefixes {
+		if strings.HasPrefix(path, prefix) || path == prefix {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Router) handleCleartextRequest(ctx context.Context, req Request) Response {
+	// Reject paths that shouldn't be reachable via relay
+	if !isRelayPathAllowed(req.Path) {
+		body := `{"error":"forbidden"}`
+		return Response{ID: req.ID, Status: 403, Body: &body}
+	}
+
 	// Build HTTP request body
 	var bodyReader *bytes.Reader
 	if req.Body != nil {
