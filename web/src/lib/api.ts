@@ -55,6 +55,7 @@ export function getMe(): Promise<User> {
 export interface Page {
   slug: string;
   title: string;
+  public: boolean;
   updated_at: string;
 }
 

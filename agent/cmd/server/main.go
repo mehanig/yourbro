@@ -78,6 +78,7 @@ func main() {
 	// Page routes — read-only via relay. Pages are created by ClawdBot internally.
 	r.Get("/api/pages", pagesHandler.List)
 	r.Get("/api/page/{slug}", pagesHandler.Get)
+	r.Get("/api/public-page/{slug}", pagesHandler.GetPublic)
 
 	// Page storage routes (auth via E2E encryption — only paired users can decrypt/encrypt)
 	r.Post("/api/page-storage/get", pageStorageHandler.Get)

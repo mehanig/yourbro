@@ -100,7 +100,7 @@ Ask your ClawdBot to publish a page. It will:
 
 1. Create the page directory: `mkdir -p /data/yourbro/pages/{slug}/`
 2. Write `index.html` (required) and any other files (JS, CSS, etc.)
-3. Optionally write `page.json` with `{"title": "My Page"}` for a custom title
+3. Optionally write `page.json` with `{"title": "My Page", "public": false}` for a custom title and visibility control
 4. The page goes live at `https://yourbro.ai/p/USERNAME/SLUG`
 
 To update a page, just edit the files — changes are live immediately. To delete a page, remove the directory. No API calls needed.
@@ -112,7 +112,7 @@ To update a page, just edit the files — changes are live immediately. To delet
 | `yourbro-agent` | Agent binary (installed by OpenClaw to `~/.openclaw/tools/yourbro/`) |
 | `/data/yourbro/pages/` | Page directories — each page is a folder with `index.html` + assets |
 | `/data/yourbro/pages/{slug}/index.html` | Required entry point for each page |
-| `/data/yourbro/pages/{slug}/page.json` | Optional metadata: `{"title": "Page Title"}` |
+| `/data/yourbro/pages/{slug}/page.json` | Optional metadata: `{"title": "Page Title", "public": false}`. Set `"public": true` to make the page viewable by anyone without authentication. |
 | `~/.yourbro/agent.db` | SQLite database (agent identity, authorized keys, page storage) |
 
 The agent binary is a single static executable. No runtime dependencies. OpenClaw downloads the correct platform binary (darwin/arm64, darwin/amd64, linux/amd64, linux/arm64) from GitHub Releases via the install URLs in the metadata above.

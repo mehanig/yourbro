@@ -19,15 +19,22 @@ type PagesHandler struct {
 	PagesDir string
 }
 
+type pageMeta struct {
+	Title  string `json:"title"`
+	Public bool   `json:"public"`
+}
+
 type pageSummary struct {
-	Slug  string `json:"slug"`
-	Title string `json:"title"`
+	Slug   string `json:"slug"`
+	Title  string `json:"title"`
+	Public bool   `json:"public"`
 }
 
 type pageBundle struct {
-	Slug  string            `json:"slug"`
-	Title string            `json:"title"`
-	Files map[string]string `json:"files"`
+	Slug   string            `json:"slug"`
+	Title  string            `json:"title"`
+	Public bool              `json:"public"`
+	Files  map[string]string `json:"files"`
 }
 
 func (h *PagesHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -50,8 +57,8 @@ func (h *PagesHandler) List(w http.ResponseWriter, r *http.Request) {
 		if _, err := os.Stat(filepath.Join(h.PagesDir, slug, "index.html")); err != nil {
 			continue
 		}
-		title := readTitle(h.PagesDir, slug)
-		pages = append(pages, pageSummary{Slug: slug, Title: title})
+		meta := readPageMeta(h.PagesDir, slug)
+		pages = append(pages, pageSummary{Slug: slug, Title: meta.Title, Public: meta.Public})
 	}
 
 	if pages == nil {
@@ -60,35 +67,32 @@ func (h *PagesHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, pages)
 }
 
-func (h *PagesHandler) Get(w http.ResponseWriter, r *http.Request) {
-	slug := chi.URLParam(r, "slug")
+// buildBundle reads all files for a page slug and returns the bundle.
+// Returns nil if the page doesn't exist or the slug is invalid.
+func (h *PagesHandler) buildBundle(slug string) (*pageBundle, int) {
 	if !validSlug.MatchString(slug) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid slug"})
-		return
+		return nil, http.StatusBadRequest
 	}
 
 	dirPath := filepath.Join(h.PagesDir, slug)
 	// Path traversal check: resolved path must be under PagesDir
 	resolved, err := filepath.EvalSymlinks(dirPath)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "page not found"})
-		return
+		return nil, http.StatusNotFound
 	}
 	absPages, _ := filepath.Abs(h.PagesDir)
 	if !strings.HasPrefix(resolved, absPages+string(os.PathSeparator)) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid slug"})
-		return
+		return nil, http.StatusBadRequest
 	}
 
 	// Must have index.html
 	if _, err := os.Stat(filepath.Join(dirPath, "index.html")); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "page not found"})
-		return
+		return nil, http.StatusNotFound
 	}
 
 	files := make(map[string]string)
 	var totalSize int64
-	const maxFileSize = 1 << 20  // 1MB per file
+	const maxFileSize = 1 << 20   // 1MB per file
 	const maxBundleSize = 10 << 20 // 10MB total
 
 	// Text file extensions — everything else is base64-encoded with "base64:" prefix
@@ -102,7 +106,6 @@ func (h *PagesHandler) Get(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if d.IsDir() {
-			// Skip subdirectories (only top-level files)
 			if path != dirPath {
 				return fs.SkipDir
 			}
@@ -111,13 +114,13 @@ func (h *PagesHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 		info, err := d.Info()
 		if err != nil {
-			return nil // skip unreadable files
+			return nil
 		}
 		if info.Size() > maxFileSize {
-			return nil // skip files > 1MB
+			return nil
 		}
 		if totalSize+info.Size() > maxBundleSize {
-			return nil // skip if total would exceed 10MB
+			return nil
 		}
 
 		content, err := os.ReadFile(path)
@@ -136,29 +139,53 @@ func (h *PagesHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read page"})
-		return
+		return nil, http.StatusInternalServerError
 	}
 
-	title := readTitle(h.PagesDir, slug)
-	writeJSON(w, http.StatusOK, pageBundle{
-		Slug:  slug,
-		Title: title,
-		Files: files,
-	})
+	meta := readPageMeta(h.PagesDir, slug)
+	return &pageBundle{
+		Slug:   slug,
+		Title:  meta.Title,
+		Public: meta.Public,
+		Files:  files,
+	}, http.StatusOK
 }
 
-// readTitle reads the title from page.json, falls back to slug.
-func readTitle(pagesDir, slug string) string {
+func (h *PagesHandler) Get(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+	bundle, status := h.buildBundle(slug)
+	if bundle == nil {
+		writeJSON(w, status, map[string]string{"error": "page not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, bundle)
+}
+
+// GetPublic serves a page bundle only if the page is marked public in page.json.
+func (h *PagesHandler) GetPublic(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+	meta := readPageMeta(h.PagesDir, slug)
+	if !meta.Public {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "page not found"})
+		return
+	}
+	bundle, status := h.buildBundle(slug)
+	if bundle == nil {
+		writeJSON(w, status, map[string]string{"error": "page not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, bundle)
+}
+
+// readPageMeta reads page.json metadata (title, public flag). Falls back to slug for title.
+func readPageMeta(pagesDir, slug string) pageMeta {
 	data, err := os.ReadFile(filepath.Join(pagesDir, slug, "page.json"))
 	if err != nil {
-		return slug
+		return pageMeta{Title: slug}
 	}
-	var meta struct {
-		Title string `json:"title"`
+	var meta pageMeta
+	if json.Unmarshal(data, &meta) != nil || meta.Title == "" {
+		meta.Title = slug
 	}
-	if json.Unmarshal(data, &meta) == nil && meta.Title != "" {
-		return meta.Title
-	}
-	return slug
+	return meta
 }

@@ -188,6 +188,7 @@ async function renderPagesList(agents: Agent[], username: string, container: HTM
     <div class="yb-dash-item">
       <div>
         <a href="/p/${esc(username)}/${esc(p.slug)}" target="_blank" style="color:#58a6ff;text-decoration:none;font-weight:600;">${esc(p.title || p.slug)}</a>
+        ${p.public ? '<span style="color:#3fb950;font-size:0.75rem;background:#1a2e1d;padding:0.1rem 0.4rem;border-radius:4px;margin-left:0.4rem;">public</span>' : ''}
         <span style="color:#656d76;margin-left:0.5rem;font-size:0.8rem;">/${esc(username)}/${esc(p.slug)}</span>
       </div>
       <button class="delete-page yb-btn-danger" data-slug="${esc(p.slug)}" data-agent-id="${onlineAgent.id}">Delete</button>

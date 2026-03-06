@@ -59,7 +59,9 @@ The shell derives an AES key from the user's X25519 private key + agent's X25519
 
 Individual assets (JS, CSS, etc.) are **never fetched over the network**. After decryption, the shell sends all files to the Service Worker via in-browser `postMessage`. The SW caches them and serves them to the iframe locally. The `/p/assets/{slug}/*` URLs only exist between the SW cache and the iframe — they never hit the wire.
 
-**NEVER fall back to plaintext relay. NEVER suggest plaintext relay as a fallback or degradation path.** If X25519 keys are missing, show an error and require re-pairing. All page content must be E2E encrypted through the relay or not delivered at all.
+**Private pages must always use E2E encryption.** If X25519 keys are missing, show an error and require re-pairing. Never fall back to plaintext relay for private pages.
+
+**Public pages** (opted in via `"public": true` in `page.json`) are served via plaintext relay through `GET /api/public-page/{username}/{slug}`. No auth or encryption required — anyone with the link can view. The agent checks the `public` flag before serving; non-public pages return 404. The API returns uniform 404 for all error cases (no info leakage). The shell branches on `yb_session` cookie presence: no cookie → try public endpoint; cookie present → E2E encrypted path.
 
 ### Auth
 - Browser auth uses httpOnly `yb_session` cookie (cross-subdomain via `COOKIE_DOMAIN`)
