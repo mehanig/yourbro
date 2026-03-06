@@ -13,22 +13,22 @@ metadata:
     install:
       - id: download-darwin-arm64
         kind: download
-        url: "https://github.com/mehanig/yourbro/releases/latest/download/yourbro-agent-darwin-arm64"
+        url: "https://yourbro.ai/releases/latest/yourbro-agent-darwin-arm64"
         bins: ["yourbro-agent"]
         label: "Download yourbro-agent (macOS Apple Silicon)"
       - id: download-darwin-amd64
         kind: download
-        url: "https://github.com/mehanig/yourbro/releases/latest/download/yourbro-agent-darwin-amd64"
+        url: "https://yourbro.ai/releases/latest/yourbro-agent-darwin-amd64"
         bins: ["yourbro-agent"]
         label: "Download yourbro-agent (macOS Intel)"
       - id: download-linux-amd64
         kind: download
-        url: "https://github.com/mehanig/yourbro/releases/latest/download/yourbro-agent-linux-amd64"
+        url: "https://yourbro.ai/releases/latest/yourbro-agent-linux-amd64"
         bins: ["yourbro-agent"]
         label: "Download yourbro-agent (Linux x86_64)"
       - id: download-linux-arm64
         kind: download
-        url: "https://github.com/mehanig/yourbro/releases/latest/download/yourbro-agent-linux-arm64"
+        url: "https://yourbro.ai/releases/latest/yourbro-agent-linux-arm64"
         bins: ["yourbro-agent"]
         label: "Download yourbro-agent (Linux ARM64)"
 ---
@@ -104,6 +104,18 @@ Ask your ClawdBot to publish a page. It will:
 4. The page goes live at `https://yourbro.ai/p/USERNAME/SLUG`
 
 To update a page, just edit the files — changes are live immediately. To delete a page, remove the directory. No API calls needed.
+
+## File Locations
+
+| Path | Description |
+|---|---|
+| `yourbro-agent` | Agent binary (installed by OpenClaw to `~/.openclaw/tools/yourbro/`) |
+| `/data/yourbro/pages/` | Page directories — each page is a folder with `index.html` + assets |
+| `/data/yourbro/pages/{slug}/index.html` | Required entry point for each page |
+| `/data/yourbro/pages/{slug}/page.json` | Optional metadata: `{"title": "Page Title"}` |
+| `~/.yourbro/agent.db` | SQLite database (agent identity, authorized keys, page storage) |
+
+The agent binary is a single static executable. No runtime dependencies. OpenClaw downloads the correct platform binary (darwin/arm64, darwin/amd64, linux/amd64, linux/arm64) from GitHub Releases via the install URLs in the metadata above.
 
 ## Configuration
 

@@ -82,7 +82,7 @@ jobs:
                   }
                 },
                 {
-                  "expression": "(http.host eq \"yourbro.ai\" and not starts_with(http.request.uri.path, \"/assets/\") and not starts_with(http.request.uri.path, \"/p/\") and not ends_with(http.request.uri.path, \".png\") and not ends_with(http.request.uri.path, \".svg\") and not ends_with(http.request.uri.path, \".ico\") and not ends_with(http.request.uri.path, \".jpg\") and not ends_with(http.request.uri.path, \".jpeg\") and not ends_with(http.request.uri.path, \".gif\") and not ends_with(http.request.uri.path, \".webp\") and not ends_with(http.request.uri.path, \".webmanifest\") and not ends_with(http.request.uri.path, \".xml\") and not ends_with(http.request.uri.path, \".js\") and not ends_with(http.request.uri.path, \".css\"))",
+                  "expression": "(http.host eq \"yourbro.ai\" and not starts_with(http.request.uri.path, \"/assets/\") and not starts_with(http.request.uri.path, \"/p/\") and not starts_with(http.request.uri.path, \"/releases/\") and not ends_with(http.request.uri.path, \".png\") and not ends_with(http.request.uri.path, \".svg\") and not ends_with(http.request.uri.path, \".ico\") and not ends_with(http.request.uri.path, \".jpg\") and not ends_with(http.request.uri.path, \".jpeg\") and not ends_with(http.request.uri.path, \".gif\") and not ends_with(http.request.uri.path, \".webp\") and not ends_with(http.request.uri.path, \".webmanifest\") and not ends_with(http.request.uri.path, \".xml\") and not ends_with(http.request.uri.path, \".js\") and not ends_with(http.request.uri.path, \".css\"))",
                   "description": "SPA Routing (exclude /p/ pages)",
                   "action": "rewrite",
                   "action_parameters": {

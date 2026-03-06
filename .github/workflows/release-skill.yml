@@ -27,15 +27,21 @@ jobs:
           - goos: linux
             goarch: amd64
             runner: ubuntu-latest
+          - goos: linux
+            goarch: arm64
+            runner: ubuntu-24.04-arm
           - goos: darwin
             goarch: arm64
             runner: macos-14
+          - goos: darwin
+            goarch: amd64
+            runner: macos-13
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24'
 
       - name: Install CGO deps (Linux)
         if: matrix.goos == 'linux'
@@ -54,18 +60,20 @@ jobs:
           path: yourbro-agent-${{ matrix.goos }}-${{ matrix.goarch }}
 
   package-skill:
-    name: Package skill
+    name: Package skill for ClawHub
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create skill zip
+      - name: Build ClawHub skill folder
         run: |
-          cd skill
-          zip -r ../yourbro-skill-${{ env.VERSION }}.zip \
-            SKILL.md \
-            scripts/ \
-            contrib/
+          # ClawHub skill package: SKILL.md + text files only.
+          # Binaries are hosted as GitHub Release assets and referenced
+          # via metadata.openclaw.install download URLs in SKILL.md.
+          mkdir -p yourbro
+          cp skill/SKILL.md yourbro/
+          cp -r skill/contrib yourbro/
+          zip -r yourbro-skill-${{ env.VERSION }}.zip yourbro/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -73,7 +81,7 @@ jobs:
           path: yourbro-skill-${{ env.VERSION }}.zip
 
   release:
-    name: Create GitHub Release
+    name: Create Release & Upload Binaries to R2
     needs: [build-agent, package-skill]
     runs-on: ubuntu-latest
     steps:
@@ -98,9 +106,37 @@ jobs:
         working-directory: release
         run: sha256sum * > checksums.txt
 
-      - name: Create release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
           files: release/*
           generate_release_notes: true
+
+      - name: Upload binaries to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: |
+          # Upload versioned binaries
+          for f in release/yourbro-agent-*; do
+            aws s3 cp "$f" "s3://yourbro/releases/${{ env.VERSION }}/$(basename $f)" \
+              --endpoint-url "$R2_ENDPOINT" --region auto \
+              --content-type application/octet-stream
+          done
+          aws s3 cp release/checksums.txt "s3://yourbro/releases/${{ env.VERSION }}/checksums.txt" \
+            --endpoint-url "$R2_ENDPOINT" --region auto
+
+          # Copy to /releases/latest/ so SKILL.md download URLs always resolve
+          for f in release/yourbro-agent-*; do
+            aws s3 cp "$f" "s3://yourbro/releases/latest/$(basename $f)" \
+              --endpoint-url "$R2_ENDPOINT" --region auto \
+              --content-type application/octet-stream
+          done
+          aws s3 cp release/checksums.txt "s3://yourbro/releases/latest/checksums.txt" \
+            --endpoint-url "$R2_ENDPOINT" --region auto
+
+          echo "Binaries uploaded to:"
+          echo "  https://yourbro.ai/releases/${{ env.VERSION }}/"
+          echo "  https://yourbro.ai/releases/latest/"
