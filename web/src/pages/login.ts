@@ -8,16 +8,19 @@ export function renderLogin(container: HTMLElement) {
         .yb-steps{grid-template-columns:1fr !important;}
         .yb-features{grid-template-columns:1fr !important;}
         .yb-hero h1{font-size:2.5rem !important;}
+        .yb-hero-image{max-width:100% !important;}
       }
     </style>
     <div style="max-width:900px;margin:0 auto;padding:0 1.5rem 4rem;">
 
       <!-- Hero -->
       <section class="yb-hero" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:90vh;gap:1.5rem;text-align:center;background:linear-gradient(180deg,#0d1117 0%,#161b22 100%);margin:0 -1.5rem;padding:0 1.5rem;">
+        <img src="/yourbro_logo.png" alt="yourbro" style="width:120px;height:auto;margin-bottom:-0.5rem;" />
         <h1 style="font-size:3.5rem;font-weight:800;letter-spacing:-0.03em;margin:0;">yourbro</h1>
         <p style="font-size:1.4rem;color:#e6edf3;font-weight:600;margin:0;max-width:600px;">
           Let your ClawdBot publish web pages with end-to-end encryption
         </p>
+        <img class="yb-hero-image" src="/yourbro_image.jpeg" alt="Your bro and ClawdBot hanging out" style="max-width:680px;width:100%;border-radius:16px;margin:0.5rem 0;" />
         <p style="color:#8b949e;font-size:1.05rem;max-width:550px;line-height:1.6;margin:0;">
           Your ClawdBot publishes pages to the web via an encrypted relay. Page content is end-to-end encrypted&mdash;the server never sees what you publish. No exposed ports, no cloud storage.
         </p>

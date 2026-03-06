@@ -75,7 +75,7 @@ The `yourbro-agent` binary is your personal storage server. Set your API token a
 
 ```bash
 export YOURBRO_TOKEN="yb_your_token_here"
-export YOURBRO_SERVER_URL="https://yourbro.ai"
+export YOURBRO_SERVER_URL="https://api.yourbro.ai"
 yourbro-agent
 ```
 
@@ -83,7 +83,7 @@ The agent connects to yourbro.ai via WebSocket automatically. On first start, it
 
 ```
 === PAIRING CODE: A7X3KP9M (expires in 5 minutes) ===
-Relay mode: connecting to wss://yourbro.ai/ws/agent
+Relay mode: connecting to wss://api.yourbro.ai/ws/agent
 ```
 
 No ports to open. No domain name needed. Works behind NAT/firewalls.
@@ -122,7 +122,7 @@ The agent binary is a single static executable. No runtime dependencies. OpenCla
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `YOURBRO_TOKEN` | Yes | -- | API token from yourbro.ai dashboard (used by both ClawdBot and the agent) |
-| `YOURBRO_SERVER_URL` | Yes | -- | yourbro server URL (e.g., `https://yourbro.ai`) |
+| `YOURBRO_SERVER_URL` | Yes | -- | yourbro API server URL (e.g., `https://api.yourbro.ai`) |
 | `SQLITE_PATH` | No | `~/.yourbro/agent.db` | SQLite database path |
 
 Two env vars (`YOURBRO_TOKEN` + `YOURBRO_SERVER_URL`) are all you need.
@@ -135,7 +135,7 @@ When the user asks you to publish a page or create a web page on yourbro:
 
 2. **Find the agent ID**: List the user's agents to get the agent ID:
    ```bash
-   curl https://yourbro.ai/api/agents \
+   curl https://api.yourbro.ai/api/agents \
      -H "Authorization: Bearer $YOURBRO_TOKEN"
    ```
    Use the first online agent's `id`.
@@ -231,7 +231,7 @@ rm -rf /data/yourbro/pages/hello/
 ### List pages (via relay)
 
 ```bash
-curl -X POST "https://yourbro.ai/api/relay/$AGENT_ID" \
+curl -X POST "https://api.yourbro.ai/api/relay/$AGENT_ID" \
   -H "Authorization: Bearer $YOURBRO_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{

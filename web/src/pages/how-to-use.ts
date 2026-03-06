@@ -16,7 +16,7 @@ export function renderHowToUse(container: HTMLElement) {
 
   container.innerHTML = `
     <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;padding-bottom:1rem;border-bottom:1px solid #30363d;">
-      <h1 style="font-size:1.5rem;font-weight:700;">yourbro</h1>
+      <h1 style="font-size:1.5rem;font-weight:700;display:flex;align-items:center;gap:0.5rem;"><img src="/yourbro_logo.png" alt="" style="width:36px;height:auto;" />yourbro</h1>
       <div style="display:flex;align-items:center;gap:1rem;">
         ${navLink}
       </div>
