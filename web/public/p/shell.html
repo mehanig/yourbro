@@ -175,9 +175,9 @@
                 }
             }
 
-            // 7. Build enriched HTML with SDK + meta tags + base href
+            // 7. Build enriched HTML — inject base + meta + SDK inside <head>
             var pageHTML = pageData.files['index.html'];
-            var metaTags =
+            var injection =
                 '<base href="/p/assets/' + slug + '/">\n' +
                 '<meta name="clawd-relay-mode" content="true">\n' +
                 '<meta name="clawd-agent-id" content="' + usedAgentId + '">\n' +
@@ -185,7 +185,15 @@
                 '<meta name="clawd-api-base" content="' + API + '">\n' +
                 '<meta name="clawd-session-token" content="' + token + '">\n' +
                 '<script>' + sdkScript + '<\/script>\n';
-            var enrichedHTML = metaTags + pageHTML;
+            // Inject right after <head> so <base> is parsed before any resource URLs
+            var headMatch = pageHTML.match(/<head([^>]*)>/i);
+            var enrichedHTML;
+            if (headMatch) {
+                enrichedHTML = pageHTML.replace(headMatch[0], headMatch[0] + '\n' + injection);
+            } else {
+                // No <head> tag — wrap in proper HTML structure
+                enrichedHTML = '<!DOCTYPE html><html><head>\n' + injection + '</head>\n' + pageHTML + '</html>';
+            }
 
             // 8. Create sandboxed iframe with srcdoc
             var container = document.createElement('div');
