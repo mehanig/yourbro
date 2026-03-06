@@ -6,18 +6,19 @@ Platform for AI-published web pages with zero-trust agent storage. Your AI agent
 
 There are **two separate systems** working together:
 
-### 1. Page Publishing (AI Agent → Agent via Relay)
+### 1. Page Publishing (ClawdBot → Agent via Internal API)
 
-Your AI agent (Claude/ClawdBot) publishes HTML pages to your local agent via the yourbro WebSocket relay. The page content is stored in your agent's SQLite database — the yourbro server never sees or stores it.
+ClawdBot writes HTML files directly to `/data/yourbro/pages/{slug}.html`, then registers them via the agent's internal API. The agent reads files from disk on every request, so edits are live immediately without re-registering.
 
 ```
-You (human)                     ClawdBot                         yourbro.ai                Your Agent
-    │                               │                               │                         │
-    ├── Create API token ──────────>│                               │                         │
-    │   (dashboard)                 │                               │                         │
-    │                               ├── POST /api/relay/AGENT_ID ──>│── WebSocket ───────────>│
-    │                               │   PUT /api/page/my-page       │   (pure relay pipe)     ├── Store in SQLite
-    │                               │                               │                         │   (your machine)
+You (human)                     ClawdBot                                           Your Agent
+    │                               │                                                   │
+    ├── Create API token ──────────>│                                                   │
+    │   (dashboard)                 │                                                   │
+    │                               ├── Write /data/yourbro/pages/my-page.html ────────>│ (shared filesystem)
+    │                               ├── PUT localhost:19200/page/my-page ───────>│
+    │                               │   X-YourBro-Internal-Key: <key>                   ├── Store path in SQLite
+    │                               │                                                   │   (your machine)
 ```
 
 ### 2. Page Viewing & Data Storage (Browser → Agent via Relay)
@@ -136,27 +137,30 @@ This generates an Ed25519 keypair in your browser and registers it with the agen
 
 ### 6. Publish a Page
 
-Pages are published to your agent via relay. Get your agent ID from the dashboard, then:
+Pages are managed via the agent's internal API. ClawdBot writes the HTML file and registers it:
 
 ```bash
-# Get agent ID
-AGENT_ID=$(curl -s http://localhost/api/agents \
-  -H "Authorization: Bearer YOUR_API_TOKEN" | jq '.[0].id')
+# Read the internal API key (auto-generated on first startup)
+KEY=$(cat /data/yourbro/internal.key)
 
-# Publish page via relay to agent
-curl -X POST "http://localhost/api/relay/$AGENT_ID" \
-  -H "Authorization: Bearer YOUR_API_TOKEN" \
+# Write the HTML file
+cat > /data/yourbro/pages/hello.html << 'EOF'
+<html><body><h1>Hello from yourbro!</h1></body></html>
+EOF
+
+# Register the page
+curl -X PUT localhost:19200/page/hello \
+  -H "X-YourBro-Internal-Key: $KEY" \
   -H "Content-Type: application/json" \
-  -d '{
-    "id": "'"$(uuidgen)"'",
-    "method": "PUT",
-    "path": "/api/page/hello",
-    "headers": {"Content-Type": "application/json"},
-    "body": "{\"title\": \"Hello World\", \"html_content\": \"<html><body><h1>Hello from yourbro!</h1></body></html>\"}"
-  }'
+  -d '{"title": "Hello World"}'
 ```
 
-The page is stored in your agent's SQLite — the server never sees it.
+The page file lives on your machine. To update content, just edit the file — changes are live immediately. To update the title, re-register. To delete:
+
+```bash
+curl -X DELETE localhost:19200/page/hello \
+  -H "X-YourBro-Internal-Key: $KEY"
+```
 
 ### 7. Visit Your Page
 
@@ -284,13 +288,20 @@ All agent endpoints are accessed through `POST /api/relay/{agent_id}`. The relay
 | GET | `/api/auth-check` | RFC 9421 sig | Check if browser's key is authorized |
 | DELETE | `/api/keys` | RFC 9421 sig | Revoke browser's signing key |
 | GET | `/api/pages` | — | List all pages |
-| GET | `/api/page/{slug}` | — | Get page content |
-| PUT | `/api/page/{slug}` | — | Create or update page |
-| DELETE | `/api/page/{slug}` | — | Delete page |
+| GET | `/api/page/{slug}` | — | Get page content (reads from disk) |
 | GET | `/api/storage/{slug}/{key}` | RFC 9421 sig | Get storage value |
 | PUT | `/api/storage/{slug}/{key}` | RFC 9421 sig | Set storage value |
 | GET | `/api/storage/{slug}?prefix=` | RFC 9421 sig | List storage keys |
 | DELETE | `/api/storage/{slug}/{key}` | RFC 9421 sig | Delete storage value |
+
+### Agent Internal API (localhost only, port 19200)
+
+ClawdBot manages pages via this API. It runs on `127.0.0.1:19200` — not exposed via relay, not accessible from the network. Auth via `X-YourBro-Internal-Key` header (key auto-generated at `/data/yourbro/internal.key`).
+
+| Method | Path | Description |
+|---|---|---|
+| PUT | `/page/{slug}` | Register a page (file must exist at `/data/yourbro/pages/{slug}.html`) |
+| DELETE | `/page/{slug}` | Unregister a page (file remains on disk) |
 
 ## Project Structure
 
