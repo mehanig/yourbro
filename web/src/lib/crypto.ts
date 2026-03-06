@@ -15,19 +15,16 @@ export interface StoredX25519Keypair {
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 2);
+    // Version 3: fresh schema — stores raw bytes instead of CryptoKey (Safari compat)
+    const req = indexedDB.open(DB_NAME, 3);
     req.onupgradeneeded = () => {
       const db = req.result;
-      // Legacy store — keep for schema version compatibility but no longer used
-      if (!db.objectStoreNames.contains("keypair")) {
-        db.createObjectStore("keypair");
+      // Delete old stores and recreate fresh
+      for (const name of Array.from(db.objectStoreNames)) {
+        db.deleteObjectStore(name);
       }
-      if (!db.objectStoreNames.contains(X25519_STORE)) {
-        db.createObjectStore(X25519_STORE);
-      }
-      if (!db.objectStoreNames.contains(AGENT_KEYS_STORE)) {
-        db.createObjectStore(AGENT_KEYS_STORE);
-      }
+      db.createObjectStore(X25519_STORE);
+      db.createObjectStore(AGENT_KEYS_STORE);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -37,51 +34,45 @@ function openDB(): Promise<IDBDatabase> {
 /**
  * Get or create an X25519 keypair for E2E encryption.
  *
- * Uses a single readwrite transaction to check-then-create atomically,
- * preventing a TOCTOU race across browser tabs.
+ * Stores raw key bytes in IndexedDB (not CryptoKey objects) for Safari
+ * compatibility. Re-imports the private key on each read.
  */
 export async function getOrCreateX25519Keypair(): Promise<StoredX25519Keypair> {
   const db = await openDB();
 
-  const existing = await new Promise<StoredX25519Keypair | null>((resolve, reject) => {
-    const tx = db.transaction(X25519_STORE, "readwrite");
-    const store = tx.objectStore(X25519_STORE);
-    const req = store.get(KEY_ID);
-    req.onsuccess = () => resolve(req.result as StoredX25519Keypair | null);
+  const stored = await new Promise<{ pk: Uint8Array; pub: Uint8Array } | null>((resolve, reject) => {
+    const tx = db.transaction(X25519_STORE, "readonly");
+    const req = tx.objectStore(X25519_STORE).get(KEY_ID);
+    req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => reject(req.error);
   });
-  if (existing) return existing;
 
-  // Generate X25519 keypair — extractable so we can export the public key
+  if (stored) {
+    const privateKey = await crypto.subtle.importKey(
+      "pkcs8", stored.pk, "X25519", false, ["deriveBits"]
+    );
+    return { privateKey, publicKeyBytes: stored.pub };
+  }
+
+  // Generate new X25519 keypair
   const kp = (await crypto.subtle.generateKey(
     "X25519", true, ["deriveBits"]
   )) as CryptoKeyPair;
 
-  const pubRaw = await crypto.subtle.exportKey("raw", kp.publicKey);
-  const publicKeyBytes = new Uint8Array(pubRaw);
+  const pub = new Uint8Array(await crypto.subtle.exportKey("raw", kp.publicKey));
+  const pk = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
 
-  // Re-import private key as non-extractable
-  const privPkcs8 = await crypto.subtle.exportKey("pkcs8", kp.privateKey);
-  const privateKey = await crypto.subtle.importKey(
-    "pkcs8", privPkcs8, "X25519", false, ["deriveBits"]
-  );
-  new Uint8Array(privPkcs8).fill(0);
-
-  return new Promise<StoredX25519Keypair>((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(X25519_STORE, "readwrite");
-    const store = tx.objectStore(X25519_STORE);
-    const checkReq = store.get(KEY_ID);
-    checkReq.onsuccess = () => {
-      if (checkReq.result) {
-        resolve(checkReq.result as StoredX25519Keypair);
-        return;
-      }
-      store.put({ privateKey, publicKeyBytes }, KEY_ID);
-    };
-    checkReq.onerror = () => reject(checkReq.error);
-    tx.oncomplete = () => resolve({ privateKey, publicKeyBytes });
+    tx.objectStore(X25519_STORE).put({ pk, pub }, KEY_ID);
+    tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
+
+  const privateKey = await crypto.subtle.importKey(
+    "pkcs8", pk, "X25519", false, ["deriveBits"]
+  );
+  return { privateKey, publicKeyBytes: pub };
 }
 
 /** Store an agent's X25519 public key (received during pairing). */
