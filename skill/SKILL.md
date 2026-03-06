@@ -105,6 +105,26 @@ Ask your ClawdBot to publish a page. It will:
 
 To update a page, just edit the files — changes are live immediately. To delete a page, remove the directory. No API calls needed.
 
+### Page Visibility (Public vs Private)
+
+Pages are **private by default**. Only the page owner (authenticated + paired browser) can view private pages via E2E encryption.
+
+To make a page public (viewable by anyone with the link, no account needed):
+
+```bash
+echo '{"title": "My Portfolio", "public": true}' > /data/yourbro/pages/my-page/page.json
+```
+
+To make it private again:
+
+```bash
+echo '{"title": "My Portfolio", "public": false}' > /data/yourbro/pages/my-page/page.json
+```
+
+If `page.json` is missing or has no `"public"` field, the page defaults to **private**.
+
+Public pages are served in plaintext (no E2E encryption) and do not have access to page storage. The agent must still be online to serve public pages.
+
 ## File Locations
 
 | Path | Description |
@@ -167,8 +187,11 @@ When the user asks you to publish a page or create a web page on yourbro:
    console.log('Hello from yourbro!');
    EOF
 
-   # Optional: set a custom title
+   # Optional: set a custom title (page is private by default)
    echo '{"title": "My Page"}' > /data/yourbro/pages/my-page/page.json
+
+   # Or make it public so anyone with the link can view it:
+   # echo '{"title": "My Page", "public": true}' > /data/yourbro/pages/my-page/page.json
    ```
 
 5. **Share the URL**: `https://yourbro.ai/p/USERNAME/my-page`
