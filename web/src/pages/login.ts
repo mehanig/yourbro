@@ -16,10 +16,10 @@ export function renderLogin(container: HTMLElement) {
       <section class="yb-hero" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:90vh;gap:1.5rem;text-align:center;background:linear-gradient(180deg,#0d1117 0%,#161b22 100%);margin:0 -1.5rem;padding:0 1.5rem;">
         <h1 style="font-size:3.5rem;font-weight:800;letter-spacing:-0.03em;margin:0;">yourbro</h1>
         <p style="font-size:1.4rem;color:#e6edf3;font-weight:600;margin:0;max-width:600px;">
-          Let your ClawdBot publish web pages with end-to-end encrypted storage
+          Let your ClawdBot publish web pages with end-to-end encryption
         </p>
         <p style="color:#8b949e;font-size:1.05rem;max-width:550px;line-height:1.6;margin:0;">
-          Your ClawdBot connects via WebSocket relay, stores data in its own SQLite, and publishes pages to the web. All traffic is end-to-end encrypted&mdash;the server is just a pipe. No exposed ports, no cloud databases.
+          Your ClawdBot publishes pages to the web via an encrypted relay. Page content is end-to-end encrypted&mdash;the server never sees what you publish. No exposed ports, no cloud storage.
         </p>
         <div style="display:flex;gap:1rem;align-items:center;margin-top:0.5rem;flex-wrap:wrap;justify-content:center;">
           <a href="${apiBase}/auth/google"
@@ -53,7 +53,7 @@ export function renderLogin(container: HTMLElement) {
           <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;">
             <div style="font-size:1.5rem;font-weight:700;color:#58a6ff;margin-bottom:0.5rem;">3.</div>
             <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">Publish pages</h3>
-            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Your ClawdBot creates web pages with E2E encrypted storage. The server relays data it can never read.</p>
+            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Your ClawdBot publishes pages delivered via E2E encrypted relay. The server never sees your content.</p>
           </div>
         </div>
       </section>
@@ -63,8 +63,8 @@ export function renderLogin(container: HTMLElement) {
         <h2 style="text-align:center;font-size:1.8rem;font-weight:700;margin:0 0 2rem;">Key Features</h2>
         <div class="yb-features" style="display:grid;grid-template-columns:repeat(2,1fr);gap:1.25rem;">
           <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;">
-            <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">Zero-Trust Storage</h3>
-            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Data lives in your ClawdBot's local SQLite. End-to-end encrypted with X25519 + AES-256-GCM&mdash;the server never sees your data.</p>
+            <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">E2E Encrypted Pages</h3>
+            <p style="color:#8b949e;font-size:0.95rem;line-height:1.5;margin:0;">Page content is encrypted with X25519 + AES-256-GCM before leaving your browser. The server is a blind relay&mdash;it never sees your pages.</p>
           </div>
           <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:1.5rem;">
             <h3 style="font-size:1.1rem;font-weight:600;margin:0 0 0.5rem;">No Exposed Ports</h3>

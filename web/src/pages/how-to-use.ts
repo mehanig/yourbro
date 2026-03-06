@@ -28,7 +28,7 @@ export function renderHowToUse(container: HTMLElement) {
       <div style="text-align:center;margin-bottom:3rem;padding:2.5rem 1.5rem;background:linear-gradient(180deg,#161b22 0%,#0d1117 100%);border:1px solid #30363d;border-radius:12px;">
         <h2 style="font-size:2.2rem;font-weight:800;margin-bottom:0.75rem;">How to Use</h2>
         <p style="color:#8b949e;font-size:1.1rem;max-width:500px;margin:0 auto;line-height:1.6;">
-          Your ClawdBot connects via WebSocket relay, publishes pages, and stores data in its own SQLite. All relay traffic is end-to-end encrypted&mdash;the server is just a pipe.
+          Your ClawdBot publishes pages via an E2E encrypted relay. The server never sees your content&mdash;it's just a pipe.
         </p>
         <div style="width:60px;height:3px;background:#58a6ff;border-radius:2px;margin:1.5rem auto 0;"></div>
       </div>
@@ -41,7 +41,7 @@ export function renderHowToUse(container: HTMLElement) {
             <h3 style="font-size:1.1rem;font-weight:700;">What is yourbro</h3>
           </div>
           <p style="color:#8b949e;font-size:0.92rem;line-height:1.65;">
-            A platform for ClawdBot-published pages with E2E encrypted storage. Your ClawdBot connects via WebSocket relay&mdash;no exposed ports needed. The SDK in published pages communicates with your ClawdBot through the encrypted relay.
+            A platform for ClawdBot-published pages with E2E encrypted delivery. Your ClawdBot connects via WebSocket relay&mdash;no exposed ports needed. Page content is encrypted end-to-end so the server never sees what you publish.
           </p>
         </div>
         <div style="padding:1.5rem;background:#161b22;border:1px solid #30363d;border-radius:10px;">
@@ -63,7 +63,7 @@ export function renderHowToUse(container: HTMLElement) {
             { n: 1, title: "Sign in", desc: "Authenticate with your Google account to get your yourbro dashboard." },
             { n: 2, title: "Install the yourbro skill", desc: "Install the yourbro skill on your ClawdBot. It connects outbound via WebSocket relay\u2014no port forwarding or public IP needed." },
             { n: 3, title: "Pair your ClawdBot", desc: "Enter the one-time pairing code shown by your ClawdBot. This exchanges X25519 keys for end-to-end encryption and Ed25519 keys for request signing." },
-            { n: 4, title: "Publish pages", desc: "Your ClawdBot creates web pages with E2E encrypted storage. The server relays data it can never read." },
+            { n: 4, title: "Publish pages", desc: "Your ClawdBot publishes pages delivered via E2E encrypted relay. The server never sees your content." },
           ].map(s => `
             <div style="display:flex;align-items:flex-start;gap:1rem;padding:1rem 1.25rem;background:#161b22;border:1px solid #30363d;border-radius:10px;">
               <div style="flex-shrink:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#0d1117;border:1px solid #30363d;border-radius:8px;font-weight:700;font-size:0.95rem;color:#58a6ff;">${s.n}</div>
@@ -90,17 +90,17 @@ export function renderHowToUse(container: HTMLElement) {
         </div>
       </div>
 
-      <!-- How Storage Works — card with callout -->
+      <!-- How Page Delivery Works — card with callout -->
       <div style="padding:1.5rem;background:#161b22;border:1px solid #30363d;border-radius:10px;margin-bottom:2rem;">
         <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.75rem;">
           ${icons.database}
-          <h3 style="font-size:1.1rem;font-weight:700;">How Storage Works</h3>
+          <h3 style="font-size:1.1rem;font-weight:700;">How Page Delivery Works</h3>
         </div>
         <p style="color:#8b949e;font-size:0.92rem;line-height:1.65;margin-bottom:1rem;">
-          Data lives in <strong style="color:#e6edf3;">your ClawdBot's</strong> own SQLite database&mdash;not on yourbro servers. The SDK in published pages sends E2E encrypted requests through the WebSocket relay to your ClawdBot. The server acts as a pure pipe and never sees the plaintext data.
+          Pages live on <strong style="color:#e6edf3;">your ClawdBot's</strong> machine&mdash;not on yourbro servers. When someone visits your page, the browser fetches the entire file bundle (HTML, JS, CSS) from your agent via an E2E encrypted relay request. The server passes through opaque ciphertext it cannot read. Assets are cached locally by a Service Worker and never hit the network individually.
         </p>
         <div style="padding:0.75rem 1rem;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-family:monospace;font-size:0.82rem;color:#8b949e;line-height:1.7;">
-          Browser &rarr; SDK encrypts request &rarr; yourbro relays (opaque) &rarr; ClawdBot decrypts &amp; responds &rarr; Browser
+          Browser encrypts request &rarr; yourbro relays (opaque) &rarr; ClawdBot encrypts response &rarr; Browser decrypts &rarr; Service Worker caches locally
         </div>
       </div>
 

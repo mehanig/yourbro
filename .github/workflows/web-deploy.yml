@@ -3,7 +3,7 @@ name: Deploy Frontend to R2
 on:
   push:
     branches: [main]
-    paths: ['web/**', 'sdk/**']
+    paths: ['web/**']
   workflow_dispatch:
 
 env:
@@ -20,12 +20,6 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-
-      - name: Build SDK
-        run: cd sdk && npm install --ignore-scripts && npm rebuild esbuild && npm run build
-
-      - name: Copy SDK to web public
-        run: mkdir -p web/public/sdk && cp sdk/dist/clawd-storage.js web/public/sdk/clawd-storage.js
 
       - name: Build Frontend
         run: cd web && npm ci && npm run build

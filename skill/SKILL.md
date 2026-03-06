@@ -1,6 +1,6 @@
 ---
 name: yourbro
-description: Publish AI-powered web pages with zero-trust agent-backed storage on yourbro.ai
+description: Publish AI-powered web pages with end-to-end encryption on yourbro.ai
 user-invocable: true
 metadata:
   openclaw:
@@ -35,15 +35,15 @@ metadata:
 
 # yourbro — Publish AI-Powered Pages
 
-Publish multi-file web pages to yourbro.ai with zero-trust, agent-backed storage. Your ClawdBot writes page directories to your agent (which stores them locally), and yourbro.ai renders them by fetching content from your agent on demand. yourbro servers never store your data.
+Publish multi-file web pages to yourbro.ai with end-to-end encryption. Your ClawdBot writes page directories to your agent (which stores them locally), and yourbro.ai renders them by fetching content from your agent via E2E encrypted relay. The server never sees your page content.
 
 ## How It Works
 
 ```
-ClawdBot writes files to /data/yourbro/pages/{slug}/ -> page is live immediately -> visitor loads page -> yourbro.ai fetches file bundle from your agent -> Service Worker caches assets -> rendered in sandboxed iframe
+ClawdBot writes files to /data/yourbro/pages/{slug}/ -> page is live immediately -> visitor loads page -> browser fetches E2E encrypted bundle from agent via relay -> decrypts -> Service Worker caches assets -> rendered in sandboxed iframe
 ```
 
-Your agent (yourbro-agent) runs on your machine and serves pages from local directories. yourbro.ai is a pure relay — it never stores, sees, or serves your content. Pages only work when your agent is online. Editing files on disk takes effect immediately.
+Your agent (yourbro-agent) runs on your machine and serves pages from local directories. yourbro.ai is a blind encrypted relay — it never stores, sees, or serves your content. All page bundles are encrypted with X25519 + AES-256-GCM before traversing the relay. Pages only work when your agent is online. Editing files on disk takes effect immediately.
 
 The agent connects to yourbro.ai via an outbound WebSocket — no exposed ports, no DNS, no TLS certificates needed.
 
@@ -128,12 +128,7 @@ When the user asks you to publish a page or create a web page on yourbro:
    ```
    Use the first online agent's `id`.
 
-3. **Generate content**: Create HTML/JS/CSS files. Pages are directory-based — each page is a folder with `index.html` plus any assets. If the page needs persistent data, use the ClawdStorage SDK:
-   ```javascript
-   const storage = await ClawdStorage.init();
-   const data = await storage.get("my-key");
-   await storage.set("counter", 42);
-   ```
+3. **Generate content**: Create HTML/JS/CSS files. Pages are directory-based — each page is a folder with `index.html` plus any assets.
 
 4. **Write the page directory**:
    ```bash
@@ -205,26 +200,6 @@ EOF
 echo '{"title": "Dashboard"}' > /data/yourbro/pages/dashboard/page.json
 ```
 
-### Page with agent-backed storage
-
-The ClawdStorage SDK handles auth and relay routing automatically:
-
-```javascript
-const storage = await ClawdStorage.init();
-
-// Read
-const counter = await storage.get("visit-count") || 0;
-
-// Write
-await storage.set("visit-count", counter + 1);
-
-// List keys
-const keys = await storage.list("dashboard-");
-
-// Delete
-await storage.delete("old-key");
-```
-
 ### Update an existing page
 
 Just edit the files — changes are live immediately:
@@ -258,9 +233,8 @@ curl -X POST "https://yourbro.ai/api/relay/$AGENT_ID" \
 
 yourbro uses zero-trust architecture:
 
-- **Zero-knowledge server**: yourbro.ai never stores, sees, or serves your page content. It's a pure relay.
+- **E2E encrypted delivery**: Page bundles are encrypted with X25519 ECDH + AES-256-GCM. The relay server passes through opaque ciphertext it cannot read.
+- **Zero-knowledge server**: yourbro.ai never stores, sees, or serves your page content. It's a blind relay.
 - **Ed25519 keypairs**: Generated locally, never transmitted. Like SSH keys.
-- **RFC 9421 HTTP Signatures**: Storage operations are cryptographically signed. No bearer tokens for agent data.
-- **Content-Digest**: Body integrity verification prevents tampering.
 - **Data isolation**: Each agent has its own SQLite database. All content lives on your machine.
 - **Agent must be online**: Pages only work when your agent is connected. No stale data, no server-side caching.

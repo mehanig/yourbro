@@ -45,13 +45,12 @@
                 }
             }
 
-            // 1. Verify auth — get content token for iframe SDK relay auth
-            var tokenResp = await fetch(API + '/api/content-token', { credentials: 'include' });
-            if (!tokenResp.ok) {
+            // 1. Verify auth
+            var authResp = await fetch(API + '/api/content-token', { credentials: 'include' });
+            if (!authResp.ok) {
                 document.body.innerHTML = '<div class="status-msg">Sign in to view this page. <a href="/">Go to login</a></div>';
                 return;
             }
-            var token = (await tokenResp.json()).token;
 
             // 2. Get agent IDs from API
             var agentsResp = await fetch(API + '/api/page-agents/' + encodeURIComponent(username), { credentials: 'include' });
@@ -65,8 +64,7 @@
                 return;
             }
 
-            // 3. Load keypairs from IndexedDB (stored by dashboard pairing flow)
-            var kp = null;
+            // 3. Load E2E keys from IndexedDB (stored by dashboard pairing flow)
             var x25519kp = null;
             var agentX25519Keys = {};
             try {
@@ -81,19 +79,12 @@
                     req.onsuccess = function() { res(req.result); };
                     req.onerror = function() { rej(req.error); };
                 });
-                kp = await new Promise(function(res, rej) {
-                    var tx = db.transaction('keypair', 'readonly');
-                    var req = tx.objectStore('keypair').get('default');
-                    req.onsuccess = function() { res(req.result || null); };
-                    req.onerror = function() { rej(req.error); };
-                });
                 x25519kp = await new Promise(function(res, rej) {
                     var tx = db.transaction('x25519', 'readonly');
                     var req = tx.objectStore('x25519').get('default');
                     req.onsuccess = function() { res(req.result || null); };
                     req.onerror = function() { rej(req.error); };
                 });
-                // Load agent X25519 keys for E2E
                 for (var i = 0; i < agentIds.length; i++) {
                     try {
                         var k = await new Promise(function(res, rej) {
@@ -107,39 +98,103 @@
                 }
             } catch(e) { /* IndexedDB not available */ }
 
-            if (!kp) {
-                document.body.innerHTML = '<div class="status-msg">No keypair found. <a href="/#/dashboard">Pair your agent first</a></div>';
+            // 4. Derive E2E encryption key (required — no plaintext relay)
+            // Find first agent with X25519 key exchange completed
+            var e2eAgentId = null;
+            var aesKey = null;
+            if (x25519kp) {
+                for (var i = 0; i < agentIds.length; i++) {
+                    if (agentX25519Keys[agentIds[i]]) {
+                        try {
+                            var agentPub = await crypto.subtle.importKey(
+                                'raw', agentX25519Keys[agentIds[i]], 'X25519', true, []
+                            );
+                            var shared = await crypto.subtle.deriveBits(
+                                { name: 'X25519', public: agentPub }, x25519kp.privateKey, 256
+                            );
+                            var hkdfKey = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
+                            aesKey = await crypto.subtle.deriveKey(
+                                { name: 'HKDF', hash: 'SHA-256', salt: new ArrayBuffer(0), info: new TextEncoder().encode('yourbro-e2e-v1') },
+                                hkdfKey,
+                                { name: 'AES-GCM', length: 256 },
+                                false,
+                                ['encrypt', 'decrypt']
+                            );
+                            e2eAgentId = agentIds[i];
+                            break;
+                        } catch(e) {
+                            console.warn('E2E key derivation failed for agent', agentIds[i], e);
+                        }
+                    }
+                }
+            }
+
+            if (!aesKey) {
+                document.body.innerHTML = '<div class="status-msg">Encryption keys missing.<div class="subtitle">Re-pair your agent to enable E2E encryption.</div><a href="/#/dashboard">Go to dashboard</a></div>';
                 return;
             }
 
-            // 4. Load SDK script from R2
-            var sdkResp = await fetch('/sdk/clawd-storage.js');
-            var sdkScript = sdkResp.ok ? await sdkResp.text() : '';
+            // E2E helpers
+            function e2eEncrypt(plaintext) {
+                var iv = crypto.getRandomValues(new Uint8Array(12));
+                return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, aesKey, plaintext).then(function(ct) {
+                    var result = new Uint8Array(12 + ct.byteLength);
+                    result.set(iv);
+                    result.set(new Uint8Array(ct), 12);
+                    return result;
+                });
+            }
+            function e2eDecrypt(data) {
+                var iv = data.slice(0, 12);
+                var ct = data.slice(12);
+                return crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, aesKey, ct).then(function(pt) {
+                    return new Uint8Array(pt);
+                });
+            }
+            function toBase64(bytes) {
+                var s = '';
+                for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+                return btoa(s);
+            }
+            function fromBase64(b64) {
+                var s = atob(b64);
+                var bytes = new Uint8Array(s.length);
+                for (var i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+                return bytes;
+            }
 
-            // 5. Fetch page bundle from agent via relay (try each agent)
+            // 5. Fetch page bundle from agent via E2E encrypted relay
             var pageData = null;
-            var usedAgentId = null;
-            for (var i = 0; i < agentIds.length; i++) {
-                try {
-                    var resp = await fetch(API + '/api/relay/' + agentIds[i], {
-                        method: 'POST',
-                        credentials: 'include',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            id: crypto.randomUUID(),
-                            method: 'GET',
-                            path: '/api/page/' + encodeURIComponent(slug)
-                        })
-                    });
-                    if (resp.ok) {
-                        var envelope = await resp.json();
-                        if (envelope.status === 200 && envelope.body) {
-                            pageData = JSON.parse(envelope.body);
-                            usedAgentId = agentIds[i];
-                            break;
+            var usedAgentId = e2eAgentId;
+            try {
+                var innerReq = JSON.stringify({
+                    id: crypto.randomUUID(),
+                    method: 'GET',
+                    path: '/api/page/' + encodeURIComponent(slug)
+                });
+                var encrypted = await e2eEncrypt(new TextEncoder().encode(innerReq));
+                var resp = await fetch(API + '/api/relay/' + e2eAgentId, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        id: crypto.randomUUID(),
+                        encrypted: true,
+                        payload: toBase64(encrypted)
+                    })
+                });
+                if (resp.ok) {
+                    var envelope = await resp.json();
+                    if (envelope.encrypted && envelope.payload) {
+                        var decrypted = await e2eDecrypt(fromBase64(envelope.payload));
+                        var innerResp = JSON.parse(new TextDecoder().decode(decrypted));
+                        if (innerResp.status === 200 && innerResp.body) {
+                            pageData = JSON.parse(innerResp.body);
                         }
                     }
-                } catch(e) {}
+                }
+            } catch(e) {
+                console.error('E2E page fetch failed:', e);
             }
 
             if (!pageData || !pageData.files || !pageData.files['index.html']) {
@@ -154,28 +209,7 @@
             var pageTitle = pageData.title || slug;
             document.title = pageTitle + ' \u2014 yourbro';
 
-            // 6. Enrich index.html with meta tags + SDK before caching
-            var pageHTML = pageData.files['index.html'];
-            var injection =
-                '<meta name="clawd-relay-mode" content="true">\n' +
-                '<meta name="clawd-agent-id" content="' + usedAgentId + '">\n' +
-                '<meta name="clawd-page-slug" content="' + slug + '">\n' +
-                '<meta name="clawd-api-base" content="' + API + '">\n' +
-                '<meta name="clawd-session-token" content="' + token + '">\n' +
-                '<script>' + sdkScript + '<\/script>\n';
-            var headMatch = pageHTML.match(/<head([^>]*)>/i);
-            var enrichedHTML;
-            if (headMatch) {
-                enrichedHTML = pageHTML.replace(headMatch[0], headMatch[0] + '\n' + injection);
-            } else {
-                enrichedHTML = '<!DOCTYPE html><html><head>\n' + injection + '</head>\n' + pageHTML + '</html>';
-            }
-            var enrichedFiles = {};
-            for (var key in pageData.files) {
-                enrichedFiles[key] = key === 'index.html' ? enrichedHTML : pageData.files[key];
-            }
-
-            // 7. Send enriched file bundle to Service Worker for caching
+            // 6. Send file bundle to Service Worker for caching
             if (swReady) {
                 try {
                     var reg = await swReady;
@@ -187,7 +221,7 @@
                             sw.postMessage({
                                 type: 'cache-page',
                                 slug: slug,
-                                files: enrichedFiles
+                                files: pageData.files
                             }, [channel.port2]);
                         });
                     }
@@ -196,7 +230,7 @@
                 }
             }
 
-            // 8. Create sandboxed iframe — SW serves the enriched index.html
+            // 7. Create sandboxed iframe — SW serves index.html
             var container = document.createElement('div');
             container.className = 'frame-container';
             var iframe = document.createElement('iframe');
@@ -205,22 +239,6 @@
             container.appendChild(iframe);
             document.body.appendChild(container);
 
-            // 9. Send keypairs to sandboxed iframe via postMessage
-            iframe.addEventListener('load', function() {
-                var msg = {
-                    type: 'clawd-keypair',
-                    privateKey: kp.privateKey,
-                    publicKeyBytes: kp.publicKeyBytes
-                };
-                if (x25519kp) {
-                    msg.x25519PrivateKey = x25519kp.privateKey;
-                    msg.x25519PublicKeyBytes = x25519kp.publicKeyBytes;
-                }
-                if (agentX25519Keys[usedAgentId]) {
-                    msg.agentX25519PublicKeyBytes = agentX25519Keys[usedAgentId];
-                }
-                iframe.contentWindow.postMessage(msg, '*');
-            });
         })();
     </script>
 </body>
