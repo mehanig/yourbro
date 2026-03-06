@@ -12,7 +12,7 @@ export async function deriveE2EKey(
   agentPubKeyBytes: Uint8Array
 ): Promise<CryptoKey> {
   const agentPub = await crypto.subtle.importKey(
-    "raw", agentPubKeyBytes, "X25519", true, []
+    "raw", agentPubKeyBytes.buffer as ArrayBuffer, "X25519", true, []
   );
   const shared = await crypto.subtle.deriveBits(
     { name: "X25519", public: agentPub }, privateKey, 256
@@ -35,7 +35,7 @@ export async function deriveE2EKey(
 /** Encrypt plaintext with AES-256-GCM. Returns IV(12) + ciphertext. */
 export async function e2eEncrypt(aesKey: CryptoKey, plaintext: Uint8Array): Promise<Uint8Array> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, plaintext);
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, plaintext.buffer as ArrayBuffer);
   const result = new Uint8Array(12 + ct.byteLength);
   result.set(iv);
   result.set(new Uint8Array(ct), 12);
