@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -237,6 +238,70 @@ func main() {
 		http.SetCookie(w, sessionCookie("", -1))
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	// Public page relay — no auth required.
+	// Agent decides whether to serve based on page.json "public" flag.
+	var validSlugRe = regexp.MustCompile(`^[a-z0-9-]+$`)
+	r.Get("/api/public-page/{username}/{slug}", func(w http.ResponseWriter, r *http.Request) {
+		username := chi.URLParam(r, "username")
+		slug := chi.URLParam(r, "slug")
+
+		// Validate slug at API level (defense in depth)
+		if !validSlugRe.MatchString(slug) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"error":"not found"}`))
+			return
+		}
+
+		// Uniform 404 for all error cases — don't leak user/agent/page existence
+		notFound := func() {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"error":"not found"}`))
+		}
+
+		user, err := db.GetUserByUsername(r.Context(), username)
+		if err != nil {
+			notFound()
+			return
+		}
+
+		agents, err := db.ListAgents(r.Context(), user.ID)
+		if err != nil || len(agents) == 0 {
+			notFound()
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+
+		// Try each online agent until one serves the public page
+		for _, agent := range agents {
+			if !relayHub.IsOnline(agent.ID) {
+				continue
+			}
+			reqID, _ := auth.GenerateRandomHex(16)
+			req := models.RelayRequest{
+				ID:     reqID,
+				Method: "GET",
+				Path:   "/api/public-page/" + slug,
+			}
+			resp, err := relayHub.SendRequest(ctx, agent.ID, req)
+			if err != nil {
+				continue
+			}
+			if resp.Status == 200 && resp.Body != nil {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "public, s-maxage=60")
+				w.WriteHeader(200)
+				w.Write([]byte(*resp.Body))
+				return
+			}
+		}
+
+		notFound()
 	})
 
 	// WebSocket endpoint for relay-mode agents (agent auth via Bearer token)

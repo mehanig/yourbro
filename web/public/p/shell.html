@@ -34,16 +34,116 @@
 
             document.title = slug + ' \u2014 yourbro';
 
-            // Register Service Worker for asset serving
+            // Register Service Worker for asset serving and await activation
             var swReady = null;
             if ('serviceWorker' in navigator) {
                 try {
-                    await navigator.serviceWorker.register('/p/page-sw.js', { scope: '/p/' });
+                    var swReg = await navigator.serviceWorker.register('/p/page-sw.js', { scope: '/p/' });
                     swReady = navigator.serviceWorker.ready;
+                    // Await activation for first-time visitors
+                    var reg = await swReady;
+                    if (!reg.active) {
+                        await new Promise(function(resolve) {
+                            var sw = reg.installing || reg.waiting;
+                            if (!sw) { resolve(); return; }
+                            sw.addEventListener('statechange', function() {
+                                if (reg.active) resolve();
+                            });
+                        });
+                    }
                 } catch(e) {
                     console.warn('SW registration failed:', e);
                 }
             }
+
+            // Shared rendering: cache files in SW and create iframe
+            async function renderPage(pageData, isPublic) {
+                var pageTitle = pageData.title || slug;
+                document.title = pageTitle + ' \u2014 yourbro';
+
+                // Send file bundle to Service Worker for caching
+                if (swReady) {
+                    try {
+                        var reg = await swReady;
+                        var sw = reg.active;
+                        if (sw) {
+                            await new Promise(function(resolve) {
+                                var channel = new MessageChannel();
+                                channel.port1.onmessage = function() { resolve(); };
+                                sw.postMessage({
+                                    type: 'cache-page',
+                                    slug: slug,
+                                    files: pageData.files
+                                }, [channel.port2]);
+                            });
+                        }
+                    } catch(e) {
+                        console.warn('SW caching failed:', e);
+                    }
+                }
+
+                // Create sandboxed iframe — SW serves index.html
+                var container = document.createElement('div');
+                container.className = 'frame-container';
+                var iframe = document.createElement('iframe');
+                iframe.src = '/p/assets/' + slug + '/index.html';
+                iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+                container.appendChild(iframe);
+                document.body.appendChild(container);
+
+                return iframe;
+            }
+
+            // Branch on auth state — check cookie presence (no network request)
+            var hasSession = document.cookie.split(';').some(function(c) {
+                return c.trim().startsWith('yb_session=');
+            });
+
+            var pageData = null;
+            var isPublic = false;
+
+            if (!hasSession) {
+                // ==========================================
+                // PUBLIC PATH — unauthenticated visitor
+                // ==========================================
+                try {
+                    var publicResp = await fetch(API + '/api/public-page/' +
+                        encodeURIComponent(username) + '/' + encodeURIComponent(slug));
+                    if (publicResp.ok) {
+                        pageData = await publicResp.json();
+                        isPublic = true;
+                    }
+                } catch(e) { /* network error */ }
+
+                if (!pageData || !pageData.files || !pageData.files['index.html']) {
+                    document.body.innerHTML = '<div class="status-msg">' +
+                        'This page is not available.' +
+                        '<div class="subtitle">It may be private or the author\'s agent may be offline.</div>' +
+                        '<a href="/">Sign in</a></div>';
+                    return;
+                }
+
+                var iframe = await renderPage(pageData, true);
+
+                // Storage bridge: respond with error for public pages (no E2E keys)
+                window.addEventListener('message', function(event) {
+                    if (!event.data || event.data.type !== 'yourbro-storage') return;
+                    if (event.source !== iframe.contentWindow) return;
+                    iframe.contentWindow.postMessage({
+                        type: 'yourbro-storage-response',
+                        action: event.data.action,
+                        requestId: event.data.requestId,
+                        ok: false,
+                        error: 'Storage is not available for public pages'
+                    }, '*');
+                });
+
+                return;
+            }
+
+            // ==========================================
+            // PRIVATE PATH — authenticated user (E2E encrypted)
+            // ==========================================
 
             // 1. Verify auth
             var authResp = await fetch(API + '/api/content-token', { credentials: 'include' });
@@ -103,8 +203,7 @@
                 }
             } catch(e) { /* IndexedDB not available */ }
 
-            // 4. Derive E2E encryption key (required — no plaintext relay)
-            // Find first agent with X25519 key exchange completed
+            // 4. Derive E2E encryption key
             var e2eAgentId = null;
             var aesKey = null;
             if (x25519Private) {
@@ -139,7 +238,7 @@
                 return;
             }
 
-            // User's X25519 public key as base64url — sent as key_id so agent knows which key to decrypt with
+            // User's X25519 public key as base64url
             var userKeyId = '';
             if (x25519PubBytes) {
                 var s = '';
@@ -177,7 +276,6 @@
             }
 
             // 5. Fetch page bundle from agent via E2E encrypted relay
-            var pageData = null;
             var usedAgentId = e2eAgentId;
             try {
                 var innerReq = JSON.stringify({
@@ -220,40 +318,9 @@
                 return;
             }
 
-            var pageTitle = pageData.title || slug;
-            document.title = pageTitle + ' \u2014 yourbro';
+            var iframe = await renderPage(pageData, false);
 
-            // 6. Send file bundle to Service Worker for caching
-            if (swReady) {
-                try {
-                    var reg = await swReady;
-                    var sw = reg.active;
-                    if (sw) {
-                        await new Promise(function(resolve) {
-                            var channel = new MessageChannel();
-                            channel.port1.onmessage = function() { resolve(); };
-                            sw.postMessage({
-                                type: 'cache-page',
-                                slug: slug,
-                                files: pageData.files
-                            }, [channel.port2]);
-                        });
-                    }
-                } catch(e) {
-                    console.warn('SW caching failed:', e);
-                }
-            }
-
-            // 7. Create sandboxed iframe — SW serves index.html
-            var container = document.createElement('div');
-            container.className = 'frame-container';
-            var iframe = document.createElement('iframe');
-            iframe.src = '/p/assets/' + slug + '/index.html';
-            iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
-            container.appendChild(iframe);
-            document.body.appendChild(container);
-
-            // 8. Storage bridge — relay iframe postMessage to agent via E2E
+            // 6. Storage bridge — relay iframe postMessage to agent via E2E
             window.addEventListener('message', async function(event) {
                 if (!event.data || event.data.type !== 'yourbro-storage') return;
                 if (event.source !== iframe.contentWindow) return;
