@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io/fs"
 	"net/http"
@@ -90,6 +91,12 @@ func (h *PagesHandler) Get(w http.ResponseWriter, r *http.Request) {
 	const maxFileSize = 1 << 20  // 1MB per file
 	const maxBundleSize = 10 << 20 // 10MB total
 
+	// Text file extensions — everything else is base64-encoded with "base64:" prefix
+	textExts := map[string]bool{
+		".html": true, ".htm": true, ".css": true, ".js": true, ".mjs": true,
+		".json": true, ".svg": true, ".txt": true, ".xml": true, ".md": true,
+	}
+
 	err = filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -120,7 +127,12 @@ func (h *PagesHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 		totalSize += info.Size()
 		relName := d.Name()
-		files[relName] = string(content)
+		ext := strings.ToLower(filepath.Ext(relName))
+		if textExts[ext] {
+			files[relName] = string(content)
+		} else {
+			files[relName] = "base64:" + base64.StdEncoding.EncodeToString(content)
+		}
 		return nil
 	})
 	if err != nil {

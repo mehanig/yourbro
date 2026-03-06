@@ -1,7 +1,7 @@
 // Service Worker for yourbro page asset serving.
 // Caches page file bundles sent via postMessage and serves them on fetch.
 
-var CACHE_NAME = 'yourbro-pages-v1';
+var CACHE_NAME = 'yourbro-pages-v2';
 
 self.addEventListener('install', function() {
     self.skipWaiting();
@@ -20,7 +20,21 @@ var MIME_TYPES = {
     '.json': 'application/json; charset=utf-8',
     '.svg':  'image/svg+xml',
     '.txt':  'text/plain; charset=utf-8',
-    '.xml':  'text/xml; charset=utf-8'
+    '.xml':  'text/xml; charset=utf-8',
+    '.png':  'image/png',
+    '.jpg':  'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif':  'image/gif',
+    '.webp': 'image/webp',
+    '.ico':  'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2':'font/woff2',
+    '.ttf':  'font/ttf',
+    '.otf':  'font/otf',
+    '.mp3':  'audio/mpeg',
+    '.mp4':  'video/mp4',
+    '.webm': 'video/webm',
+    '.pdf':  'application/pdf'
 };
 
 function getMimeType(filename) {
@@ -41,7 +55,16 @@ self.addEventListener('message', function(event) {
         var promises = Object.keys(files).map(function(filename) {
             var url = '/p/assets/' + slug + '/' + filename;
             var contentType = getMimeType(filename);
-            var response = new Response(files[filename], {
+            var content = files[filename];
+            // Decode base64-encoded binary files (prefixed with "base64:" by agent)
+            if (typeof content === 'string' && content.substring(0, 7) === 'base64:') {
+                var b64 = content.substring(7);
+                var bin = atob(b64);
+                var bytes = new Uint8Array(bin.length);
+                for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                content = bytes.buffer;
+            }
+            var response = new Response(content, {
                 status: 200,
                 headers: { 'Content-Type': contentType }
             });
