@@ -49,7 +49,7 @@ export async function getOrCreateX25519Keypair(): Promise<StoredX25519Keypair> {
 
   if (stored) {
     const privateKey = await crypto.subtle.importKey(
-      "pkcs8", stored.pk, "X25519", false, ["deriveBits"]
+      "pkcs8", stored.pk.buffer as ArrayBuffer, "X25519", false, ["deriveBits"]
     );
     return { privateKey, publicKeyBytes: stored.pub };
   }
@@ -70,7 +70,7 @@ export async function getOrCreateX25519Keypair(): Promise<StoredX25519Keypair> {
   });
 
   const privateKey = await crypto.subtle.importKey(
-    "pkcs8", pk, "X25519", false, ["deriveBits"]
+    "pkcs8", pk.buffer as ArrayBuffer, "X25519", false, ["deriveBits"]
   );
   return { privateKey, publicKeyBytes: pub };
 }
