@@ -88,19 +88,19 @@ function renderAgentsSplit(agents: Agent[], container: HTMLElement) {
     pairedEl.innerHTML = [...paired, ...checking].map(a => {
       const isChecking = checking.includes(a);
       const statusDot = a.is_online
-        ? `<span style="color:#3fb950;font-size:1.2rem;">●</span>`
-        : `<span style="color:#656d76;font-size:1.2rem;">○</span>`;
+        ? `<span style="color:#3fb950;font-size:0.7rem;">●</span>`
+        : `<span style="color:#656d76;font-size:0.7rem;">○</span>`;
       const checkingLabel = isChecking
-        ? `<span style="color:#656d76;font-size:0.8rem;margin-left:0.5rem;">checking...</span>`
+        ? `<span style="color:#656d76;font-size:0.8rem;">checking...</span>`
         : "";
       return `
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
-          <div style="display:flex;align-items:center;gap:0.75rem;">
+        <div class="yb-dash-item">
+          <div style="display:flex;align-items:center;gap:0.6rem;">
             ${statusDot}
             <span style="font-weight:600;">${esc(a.name || "unnamed")}</span>
             ${checkingLabel}
           </div>
-          ${!isChecking ? `<button class="delete-agent" data-id="${a.id}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Remove</button>` : ""}
+          ${!isChecking ? `<button class="delete-agent yb-btn-danger" data-id="${a.id}">Remove</button>` : ""}
         </div>`;
     }).join("");
   }
@@ -110,17 +110,15 @@ function renderAgentsSplit(agents: Agent[], container: HTMLElement) {
     availableEl.innerHTML = '<p style="color:#656d76;">No unpaired agents online.</p>';
   } else {
     availableEl.innerHTML = available.map(a => `
-      <div style="padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
-          <div style="display:flex;align-items:center;gap:0.75rem;">
-            <span style="color:#e3b341;font-size:1.2rem;">●</span>
-            <span style="font-weight:600;">${esc(a.name || "unnamed")}</span>
-            <span style="color:#e3b341;font-size:0.8rem;">needs pairing</span>
-          </div>
+      <div style="padding:0.65rem 0;border-bottom:1px solid #21262d;">
+        <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.5rem;">
+          <span style="color:#e3b341;font-size:0.7rem;">●</span>
+          <span style="font-weight:600;">${esc(a.name || "unnamed")}</span>
+          <span style="color:#e3b341;font-size:0.75rem;background:#2d2200;padding:0.1rem 0.4rem;border-radius:4px;">needs pairing</span>
         </div>
         <div style="display:flex;gap:0.5rem;align-items:center;">
-          <input class="pair-code-input" data-agent-id="${a.id}" type="text" placeholder="Pairing code" style="width:140px;padding:0.4rem;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;font-family:monospace;font-size:0.85rem;" />
-          <button class="pair-agent-btn" data-agent-id="${a.id}" style="padding:0.4rem 0.8rem;background:#1a2e1d;border:1px solid #2a5a30;color:#3fb950;border-radius:6px;cursor:pointer;font-size:0.85rem;">Pair</button>
+          <input class="pair-code-input" data-agent-id="${a.id}" type="text" placeholder="Pairing code" style="width:140px;padding:0.4rem 0.5rem;background:#0d1117;border:1px solid #21262d;color:#e6edf3;border-radius:6px;font-family:monospace;font-size:0.85rem;" />
+          <button class="pair-agent-btn" style="padding:0.4rem 0.8rem;background:#1a2e1d;border:none;color:#3fb950;border-radius:6px;cursor:pointer;font-size:0.85rem;transition:background 0.15s;" data-agent-id="${a.id}">Pair</button>
         </div>
         <div class="pair-agent-status" data-agent-id="${a.id}" style="margin-top:0.5rem;display:none;padding:0.5rem;border-radius:6px;font-size:0.85rem;"></div>
       </div>
@@ -187,12 +185,12 @@ async function renderPagesList(agents: Agent[], username: string, container: HTM
   }
 
   pagesEl.innerHTML = pages.map((p: Page) => `
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
+    <div class="yb-dash-item">
       <div>
         <a href="/p/${esc(username)}/${esc(p.slug)}" target="_blank" style="color:#58a6ff;text-decoration:none;font-weight:600;">${esc(p.title || p.slug)}</a>
-        <span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">/${esc(username)}/${esc(p.slug)}</span>
+        <span style="color:#656d76;margin-left:0.5rem;font-size:0.8rem;">/${esc(username)}/${esc(p.slug)}</span>
       </div>
-      <button class="delete-page" data-slug="${esc(p.slug)}" data-agent-id="${onlineAgent.id}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Delete</button>
+      <button class="delete-page yb-btn-danger" data-slug="${esc(p.slug)}" data-agent-id="${onlineAgent.id}">Delete</button>
     </div>
   `).join("");
 
@@ -337,63 +335,91 @@ export async function renderDashboard(container: HTMLElement) {
   const tokens = (await listTokens()) || [];
 
   container.innerHTML = `
-    <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;padding-bottom:1rem;border-bottom:1px solid #30363d;">
-      <h1 style="font-size:1.5rem;font-weight:700;display:flex;align-items:center;gap:0.5rem;"><img src="/yourbro_logo.png" alt="" style="width:36px;height:auto;" />yourbro</h1>
+    <style>
+      .yb-dash-section{background:#161b22;border-radius:12px;padding:1.5rem 1.75rem;margin-bottom:1.25rem;}
+      .yb-dash-section h2{font-size:1.1rem;font-weight:700;margin:0 0 1rem;display:flex;align-items:center;gap:0.5rem;}
+      .yb-dash-section h2 .yb-icon{font-size:1.2rem;opacity:0.7;}
+      .yb-dash-item{display:flex;justify-content:space-between;align-items:center;padding:0.65rem 0;border-bottom:1px solid #21262d;}
+      .yb-dash-item:last-child{border-bottom:none;}
+      .yb-btn-danger{padding:0.3rem 0.7rem;background:transparent;border:1px solid #5a1d22;color:#f85149;border-radius:6px;cursor:pointer;font-size:0.8rem;transition:background 0.15s;}
+      .yb-btn-danger:hover{background:#2d1214;}
+      .yb-btn-secondary{padding:0.45rem 1rem;background:#21262d;border:none;color:#e6edf3;border-radius:6px;cursor:pointer;font-size:0.85rem;transition:background 0.15s;}
+      .yb-btn-secondary:hover{background:#30363d;}
+      @media(max-width:700px){
+        .yb-dash-grid{grid-template-columns:1fr !important;}
+        .yb-dash-header{flex-direction:column;gap:1rem !important;align-items:flex-start !important;}
+      }
+    </style>
+    <div style="max-width:1060px;margin:0 auto;padding:2rem 1.5rem;">
+
+    <!-- Header -->
+    <header class="yb-dash-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;">
+      <div style="display:flex;align-items:center;gap:0.75rem;">
+        <a href="#/" style="display:flex;align-items:center;gap:0.75rem;text-decoration:none;color:#e6edf3;">
+          <img src="/yourbro_logo.png" alt="" style="width:36px;height:auto;" />
+          <h1 style="font-size:1.5rem;font-weight:700;margin:0;">yourbro</h1>
+        </a>
+      </div>
       <div style="display:flex;align-items:center;gap:1rem;">
-        <span style="color:#8b949e;">${esc(user.email)}</span>
+        <span style="color:#656d76;font-size:0.9rem;">${esc(user.email)}</span>
         <a href="#/how-to-use" style="color:#58a6ff;text-decoration:none;font-size:0.9rem;">How to Use</a>
-        <button id="logout-btn" style="padding:0.4rem 0.8rem;background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:6px;cursor:pointer;">Logout</button>
+        <button id="logout-btn" class="yb-btn-secondary">Logout</button>
       </div>
     </header>
 
-    <section style="margin-bottom:2rem;">
-      <h2 style="font-size:1.2rem;margin-bottom:1rem;">Your Agents</h2>
-      <div id="paired-agents-list">
-        <p style="color:#656d76;">Connecting...</p>
-      </div>
-      <p style="color:#656d76;font-size:0.8rem;margin-top:0.5rem;">● online &nbsp; ○ offline</p>
-    </section>
-
-    <section style="margin-bottom:2rem;">
-      <h2 style="font-size:1.2rem;margin-bottom:1rem;">Available Agents</h2>
-      <p style="color:#8b949e;margin-bottom:0.75rem;font-size:0.9rem;">
-        Online agents that need pairing with this browser. Enter the pairing code shown in your agent's terminal.
-      </p>
-      <div id="available-agents-list">
-        <p style="color:#656d76;">Waiting for agents...</p>
-      </div>
-    </section>
-
-    <section style="margin-bottom:2rem;">
-      <h2 style="font-size:1.2rem;margin-bottom:1rem;">Pages</h2>
+    <!-- Pages (full width) -->
+    <div class="yb-dash-section">
+      <h2><span class="yb-icon">◧</span> Pages</h2>
       <div id="pages-list">
-        <p style="color:#656d76;">Waiting for agent connection...</p>
+        <p style="color:#656d76;margin:0;">Waiting for agent connection...</p>
       </div>
-    </section>
+    </div>
 
-    <section style="margin-bottom:2rem;">
-      <h2 style="font-size:1.2rem;margin-bottom:1rem;">API Tokens</h2>
+    <!-- Agents (two columns) -->
+    <div class="yb-dash-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;align-items:start;">
+      <div class="yb-dash-section">
+        <h2><span class="yb-icon">●</span> Paired Agents</h2>
+        <div id="paired-agents-list">
+          <p style="color:#656d76;margin:0;">Connecting...</p>
+        </div>
+      </div>
+
+      <div class="yb-dash-section">
+        <h2><span class="yb-icon" style="color:#e3b341;">◐</span> Available Agents</h2>
+        <p style="color:#656d76;font-size:0.85rem;margin:-0.5rem 0 1rem;line-height:1.5;">
+          Online agents that need pairing. Enter the code from your agent's terminal.
+        </p>
+        <div id="available-agents-list">
+          <p style="color:#656d76;margin:0;">Waiting for agents...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- API Tokens (full width) -->
+    <div class="yb-dash-section">
+      <h2><span class="yb-icon">⚿</span> API Tokens</h2>
       <div id="tokens-list">
         ${tokens
           .map(
             (t: Token) => `
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:0.75rem;background:#161b22;border:1px solid #30363d;border-radius:8px;margin-bottom:0.5rem;">
+            <div class="yb-dash-item">
               <div>
                 <span style="font-weight:600;">${esc(t.name)}</span>
-                <span style="color:#656d76;margin-left:0.5rem;font-size:0.85rem;">${esc(t.scopes.join(", "))}</span>
+                <span style="color:#656d76;margin-left:0.5rem;font-size:0.8rem;">${esc(t.scopes.join(", "))}</span>
               </div>
-              <button class="delete-token" data-id="${t.id}" style="padding:0.3rem 0.6rem;background:#2d1214;border:1px solid #5a1d22;color:#f85149;border-radius:4px;cursor:pointer;font-size:0.8rem;">Revoke</button>
+              <button class="delete-token yb-btn-danger" data-id="${t.id}">Revoke</button>
             </div>
           `
           )
           .join("")}
       </div>
-      <button id="create-token-btn" style="margin-top:0.5rem;padding:0.5rem 1rem;background:#21262d;border:1px solid #30363d;color:#e6edf3;border-radius:6px;cursor:pointer;">+ New Token</button>
-      <div id="new-token-display" style="display:none;margin-top:1rem;padding:1rem;background:#0f1a10;border:1px solid #1b3a20;border-radius:8px;">
-        <p style="color:#3fb950;margin-bottom:0.5rem;">Token created! Copy it now — it won't be shown again:</p>
-        <code id="new-token-value" style="display:block;padding:0.5rem;background:#0d1117;border-radius:4px;word-break:break-all;color:#3fb950;"></code>
+      <button id="create-token-btn" class="yb-btn-secondary" style="margin-top:0.75rem;">+ New Token</button>
+      <div id="new-token-display" style="display:none;margin-top:1rem;padding:1rem;background:#0f1a10;border-radius:8px;">
+        <p style="color:#3fb950;margin-bottom:0.5rem;font-size:0.9rem;">Token created! Copy it now — it won't be shown again:</p>
+        <code id="new-token-value" style="display:block;padding:0.5rem;background:#0d1117;border-radius:4px;word-break:break-all;color:#3fb950;font-size:0.85rem;"></code>
       </div>
-    </section>
+    </div>
+    </div>
   `;
 
   // SSE for real-time agent status
