@@ -96,7 +96,5 @@ type OAuthCallbackResponse struct {
 
 // ValidScopes defines allowed token scopes.
 var ValidScopes = map[string]bool{
-	"publish:pages": true,
-	"read:pages":    true,
-	"manage:keys":   true,
+	"manage:keys": true,
 }

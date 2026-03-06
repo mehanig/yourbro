@@ -523,8 +523,7 @@ export async function renderDashboard(container: HTMLElement) {
     ?.addEventListener("click", async () => {
       const name = prompt("Token name:", "clawdbot") || "clawdbot";
       const resp = await createToken(name, [
-        "publish:pages",
-        "read:pages",
+        "manage:keys",
       ]);
       const display = document.getElementById("new-token-display")!;
       display.style.display = "block";
