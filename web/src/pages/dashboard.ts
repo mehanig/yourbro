@@ -360,58 +360,152 @@ async function openAnalyticsModal(slug: string) {
 
   const overlay = document.createElement("div");
   overlay.id = "yb-analytics-modal";
-  overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:1rem;";
-  overlay.innerHTML = `
-    <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;padding:1.75rem;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;">
-        <h2 style="margin:0;font-size:1.1rem;font-weight:700;">Analytics: ${esc(slug)}</h2>
-        <button id="yb-modal-close" style="background:none;border:none;color:#656d76;font-size:1.4rem;cursor:pointer;padding:0.2rem 0.5rem;">&times;</button>
-      </div>
-      <p style="color:#656d76;">Loading analytics...</p>
-    </div>`;
   document.body.appendChild(overlay);
+
+  // Use a <style> tag for robust styling (inline styles can conflict with page CSS)
+  overlay.innerHTML = `
+    <style>
+      #yb-analytics-modal {
+        position: fixed !important;
+        top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+        background: rgba(0,0,0,0.75) !important;
+        z-index: 9999 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 1rem !important;
+      }
+      .yb-modal-card {
+        background: #161b22 !important;
+        border: 1px solid #30363d !important;
+        border-radius: 12px !important;
+        max-width: 520px !important;
+        width: 100% !important;
+        max-height: 85vh !important;
+        overflow-y: auto !important;
+        padding: 1.5rem !important;
+        box-shadow: 0 16px 48px rgba(0,0,0,0.5) !important;
+        color: #e6edf3 !important;
+        font-family: system-ui, -apple-system, sans-serif !important;
+      }
+      .yb-modal-header {
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+        margin-bottom: 1.25rem !important;
+      }
+      .yb-modal-header h2 {
+        margin: 0 !important;
+        font-size: 1.05rem !important;
+        font-weight: 700 !important;
+        color: #e6edf3 !important;
+      }
+      .yb-modal-close {
+        background: none !important;
+        border: none !important;
+        color: #656d76 !important;
+        font-size: 1.5rem !important;
+        cursor: pointer !important;
+        padding: 0.2rem 0.5rem !important;
+        line-height: 1 !important;
+      }
+      .yb-modal-close:hover { color: #e6edf3 !important; }
+      .yb-modal-stats {
+        display: flex !important;
+        gap: 1.5rem !important;
+        margin-bottom: 1.5rem !important;
+        flex-wrap: wrap !important;
+      }
+      .yb-modal-stat-label { color: #656d76 !important; font-size: 0.8rem !important; margin-bottom: 0.15rem !important; }
+      .yb-modal-stat-value { font-size: 1.4rem !important; font-weight: 700 !important; color: #e6edf3 !important; }
+      .yb-modal-stat-value-sm { font-size: 0.95rem !important; font-weight: 600 !important; color: #8b949e !important; margin-top: 0.25rem !important; }
+      .yb-modal-section-title {
+        font-size: 0.9rem !important;
+        font-weight: 600 !important;
+        color: #e6edf3 !important;
+        margin: 1.25rem 0 0.6rem !important;
+        padding-bottom: 0.4rem !important;
+        border-bottom: 1px solid #21262d !important;
+      }
+      .yb-modal-bar-row {
+        display: flex !important;
+        align-items: center !important;
+        gap: 0.5rem !important;
+        margin-bottom: 0.35rem !important;
+      }
+      .yb-modal-bar-date { color: #8b949e !important; font-size: 0.8rem !important; min-width: 48px !important; text-align: right !important; flex-shrink: 0 !important; }
+      .yb-modal-bar { background: #1f6feb !important; height: 18px !important; border-radius: 3px !important; min-width: 3px !important; flex-shrink: 0 !important; }
+      .yb-modal-bar-count { color: #e6edf3 !important; font-size: 0.8rem !important; flex-shrink: 0 !important; }
+      .yb-modal-bar-unique { color: #656d76 !important; font-size: 0.75rem !important; flex-shrink: 0 !important; }
+      .yb-modal-ref-row {
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: center !important;
+        padding: 0.4rem 0 !important;
+        border-bottom: 1px solid #21262d !important;
+      }
+      .yb-modal-ref-row:last-child { border-bottom: none !important; }
+      .yb-modal-ref-source { color: #e6edf3 !important; font-size: 0.85rem !important; }
+      .yb-modal-ref-count { color: #8b949e !important; font-size: 0.85rem !important; }
+      .yb-modal-ref-pct { color: #656d76 !important; }
+      .yb-modal-empty { color: #656d76 !important; font-size: 0.85rem !important; }
+      @media (max-width: 560px) {
+        .yb-modal-card { padding: 1rem !important; margin: 0.5rem !important; }
+        .yb-modal-stats { gap: 1rem !important; }
+        .yb-modal-stat-value { font-size: 1.2rem !important; }
+        .yb-modal-bar { max-width: 120px !important; }
+      }
+    </style>
+    <div class="yb-modal-card">
+      <div class="yb-modal-header">
+        <h2>Analytics: ${esc(slug)}</h2>
+        <button class="yb-modal-close">&times;</button>
+      </div>
+      <p class="yb-modal-empty">Loading analytics...</p>
+    </div>`;
 
   // Close handlers
   const close = () => overlay.remove();
-  document.getElementById("yb-modal-close")!.addEventListener("click", close);
+  overlay.querySelector(".yb-modal-close")!.addEventListener("click", close);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  document.addEventListener("keydown", function escHandler(e) {
+    if (e.key === "Escape") { close(); document.removeEventListener("keydown", escHandler); }
+  });
 
   try {
     const data: PageDetailedAnalytics = await getPageDetailedAnalytics(slug);
-    const content = overlay.querySelector("div > div:first-child")?.parentElement;
-    if (!content) return;
+    const card = overlay.querySelector(".yb-modal-card") as HTMLElement;
+    if (!card) return;
 
     // Summary stats
     let lastViewed = "Never";
     if (data.last_viewed_at) {
       const d = new Date(data.last_viewed_at);
-      const now = Date.now();
-      const diff = now - d.getTime();
+      const diff = Date.now() - d.getTime();
       if (diff < 3600000) lastViewed = `${Math.floor(diff / 60000)}m ago`;
       else if (diff < 86400000) lastViewed = `${Math.floor(diff / 3600000)}h ago`;
       else lastViewed = d.toLocaleDateString();
     }
 
-    // Build daily views bar chart (ASCII-style with divs)
-    let dailyHtml = '<p style="color:#656d76;font-size:0.85rem;">No daily data yet.</p>';
+    // Build daily views bar chart
+    let dailyHtml = '<p class="yb-modal-empty">No daily data yet.</p>';
     if (data.daily_views && data.daily_views.length > 0) {
       const maxViews = Math.max(...data.daily_views.map(d => d.views));
-      const maxBarWidth = 200; // px
       dailyHtml = data.daily_views.slice(0, 14).map(dv => {
-        const barWidth = maxViews > 0 ? Math.max(2, Math.round((dv.views / maxViews) * maxBarWidth)) : 2;
+        const barPct = maxViews > 0 ? Math.max(1, Math.round((dv.views / maxViews) * 100)) : 1;
         const dateLabel = new Date(dv.date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
         return `
-          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem;">
-            <span style="color:#8b949e;font-size:0.8rem;min-width:50px;text-align:right;">${dateLabel}</span>
-            <div style="background:#1f6feb;height:16px;width:${barWidth}px;border-radius:3px;"></div>
-            <span style="color:#e6edf3;font-size:0.8rem;">${dv.views}</span>
-            <span style="color:#656d76;font-size:0.75rem;">(${dv.unique_views} unique)</span>
+          <div class="yb-modal-bar-row">
+            <span class="yb-modal-bar-date">${dateLabel}</span>
+            <div class="yb-modal-bar" style="width:${barPct}%"></div>
+            <span class="yb-modal-bar-count">${dv.views}</span>
+            <span class="yb-modal-bar-unique">(${dv.unique_views} uniq)</span>
           </div>`;
       }).join("");
     }
 
     // Build referrers table
-    let refsHtml = '<p style="color:#656d76;font-size:0.85rem;">No referrer data yet.</p>';
+    let refsHtml = '<p class="yb-modal-empty">No referrer data yet.</p>';
     if (data.top_referrers && data.top_referrers.length > 0) {
       const totalRefViews = data.top_referrers.reduce((sum, r) => sum + r.count, 0);
       refsHtml = data.top_referrers.map(r => {
@@ -419,45 +513,42 @@ async function openAnalyticsModal(slug: string) {
         try { label = new URL(r.source).hostname; } catch { /* use raw */ }
         const pct = totalRefViews > 0 ? Math.round((r.count / totalRefViews) * 100) : 0;
         return `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:0.35rem 0;border-bottom:1px solid #21262d;">
-            <span style="color:#e6edf3;font-size:0.85rem;">${esc(label)}</span>
-            <span style="color:#8b949e;font-size:0.85rem;">${r.count} <span style="color:#656d76;">(${pct}%)</span></span>
+          <div class="yb-modal-ref-row">
+            <span class="yb-modal-ref-source">${esc(label)}</span>
+            <span class="yb-modal-ref-count">${r.count} <span class="yb-modal-ref-pct">(${pct}%)</span></span>
           </div>`;
       }).join("");
     }
 
-    content.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;">
-        <h2 style="margin:0;font-size:1.1rem;font-weight:700;">Analytics: ${esc(slug)}</h2>
-        <button id="yb-modal-close" style="background:none;border:none;color:#656d76;font-size:1.4rem;cursor:pointer;padding:0.2rem 0.5rem;">&times;</button>
+    card.innerHTML = `
+      <div class="yb-modal-header">
+        <h2>Analytics: ${esc(slug)}</h2>
+        <button class="yb-modal-close">&times;</button>
       </div>
-
-      <div style="display:flex;gap:1.5rem;margin-bottom:1.5rem;">
+      <div class="yb-modal-stats">
         <div>
-          <div style="color:#656d76;font-size:0.8rem;">Total views</div>
-          <div style="font-size:1.5rem;font-weight:700;color:#e6edf3;">${data.total_views}</div>
+          <div class="yb-modal-stat-label">Total views</div>
+          <div class="yb-modal-stat-value">${data.total_views}</div>
         </div>
         <div>
-          <div style="color:#656d76;font-size:0.8rem;">Unique (30d)</div>
-          <div style="font-size:1.5rem;font-weight:700;color:#e6edf3;">${data.unique_visitors_30d}</div>
+          <div class="yb-modal-stat-label">Unique (30d)</div>
+          <div class="yb-modal-stat-value">${data.unique_visitors_30d}</div>
         </div>
         <div>
-          <div style="color:#656d76;font-size:0.8rem;">Last viewed</div>
-          <div style="font-size:1rem;font-weight:600;color:#8b949e;margin-top:0.3rem;">${lastViewed}</div>
+          <div class="yb-modal-stat-label">Last viewed</div>
+          <div class="yb-modal-stat-value-sm">${lastViewed}</div>
         </div>
       </div>
-
-      <h3 style="font-size:0.95rem;font-weight:600;color:#e6edf3;margin:0 0 0.75rem;">Views (last 14 days)</h3>
+      <div class="yb-modal-section-title">Views (last 14 days)</div>
       ${dailyHtml}
-
-      <h3 style="font-size:0.95rem;font-weight:600;color:#e6edf3;margin:1.25rem 0 0.75rem;">Top Referrers</h3>
+      <div class="yb-modal-section-title">Top Referrers</div>
       ${refsHtml}
     `;
 
-    document.getElementById("yb-modal-close")!.addEventListener("click", close);
+    card.querySelector(".yb-modal-close")!.addEventListener("click", close);
   } catch (err) {
-    const content = overlay.querySelector("div > p");
-    if (content) content.textContent = `Failed to load analytics: ${err instanceof Error ? err.message : String(err)}`;
+    const p = overlay.querySelector(".yb-modal-empty");
+    if (p) p.textContent = `Failed to load analytics: ${err instanceof Error ? err.message : String(err)}`;
   }
 }
 
