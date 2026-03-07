@@ -248,6 +248,68 @@ func (db *DB) GetAgentByUserAndName(ctx context.Context, userID int64, name stri
 	return &a, nil
 }
 
+// Page Views (analytics)
+
+func (db *DB) InsertPageView(ctx context.Context, userID int64, slug, ipHash, referrer string, isBot bool) error {
+	_, err := db.Pool.Exec(ctx, `
+		INSERT INTO page_views (user_id, slug, ip_hash, referrer, is_bot)
+		VALUES ($1, $2, $3, $4, $5)
+	`, userID, slug, ipHash, referrer, isBot)
+	return err
+}
+
+func (db *DB) GetPageAnalytics(ctx context.Context, userID int64) ([]models.PageAnalytics, error) {
+	rows, err := db.Pool.Query(ctx, `
+		SELECT slug,
+		       COUNT(*) AS total_views,
+		       COUNT(DISTINCT ip_hash) FILTER (WHERE viewed_at > NOW() - INTERVAL '30 days') AS unique_30d,
+		       MAX(viewed_at) AS last_viewed_at
+		FROM page_views
+		WHERE user_id = $1 AND NOT is_bot
+		GROUP BY slug
+		ORDER BY total_views DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []models.PageAnalytics
+	for rows.Next() {
+		var pa models.PageAnalytics
+		if err := rows.Scan(&pa.Slug, &pa.TotalViews, &pa.UniqueVisitors, &pa.LastViewedAt); err != nil {
+			return nil, err
+		}
+		results = append(results, pa)
+	}
+	return results, nil
+}
+
+func (db *DB) GetTopReferrers(ctx context.Context, userID int64, slug string, limit int) ([]models.Referrer, error) {
+	rows, err := db.Pool.Query(ctx, `
+		SELECT referrer, COUNT(*) AS count
+		FROM page_views
+		WHERE user_id = $1 AND slug = $2 AND NOT is_bot AND referrer != ''
+		GROUP BY referrer
+		ORDER BY count DESC
+		LIMIT $3
+	`, userID, slug, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var refs []models.Referrer
+	for rows.Next() {
+		var r models.Referrer
+		if err := rows.Scan(&r.Source, &r.Count); err != nil {
+			return nil, err
+		}
+		refs = append(refs, r)
+	}
+	return refs, nil
+}
+
 // RunMigrations runs SQL migration files in order.
 func (db *DB) RunMigrations(ctx context.Context, migrationsDir string) error {
 	// Create migrations tracking table

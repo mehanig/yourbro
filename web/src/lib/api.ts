@@ -83,6 +83,19 @@ export async function listPagesViaRelay(agentId: number): Promise<Page[]> {
   }
 }
 
+// Page Analytics
+export interface PageAnalytics {
+  slug: string;
+  total_views: number;
+  unique_visitors_30d: number;
+  last_viewed_at?: string;
+  top_referrers?: { source: string; count: number }[];
+}
+
+export function getPageAnalytics(): Promise<PageAnalytics[]> {
+  return request("/api/page-analytics");
+}
+
 // Tokens
 export interface Token {
   id: number;

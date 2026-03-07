@@ -24,6 +24,7 @@ import (
 	"github.com/joho/godotenv"
 	"golang.org/x/oauth2"
 
+	"github.com/mehanig/yourbro/api/internal/analytics"
 	"github.com/mehanig/yourbro/api/internal/auth"
 	"github.com/mehanig/yourbro/api/internal/handlers"
 	"github.com/mehanig/yourbro/api/internal/middleware"
@@ -129,6 +130,7 @@ func main() {
 	pagesHandler := &handlers.PagesHandler{
 		DB: db,
 	}
+	viewRecorder := analytics.New(db, 256, 4)
 
 	r := chi.NewRouter()
 
@@ -141,7 +143,7 @@ func main() {
 		// "null" origin comes from sandboxed iframes (sandbox="allow-scripts" without allow-same-origin)
 		AllowedOrigins:   []string{frontendURL, "null"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Referrer"},
 		AllowCredentials: true,
 		MaxAge:           86400,
 	}))
@@ -297,6 +299,15 @@ func main() {
 				w.Header().Set("Cache-Control", "public, s-maxage=60")
 				w.WriteHeader(200)
 				w.Write([]byte(*resp.Body))
+
+				// Record analytics (async, non-blocking)
+				viewRecorder.Record(analytics.PageView{
+					UserID:    user.ID,
+					Slug:      slug,
+					IP:        r.RemoteAddr,
+					Referrer:  r.Header.Get("X-Referrer"),
+					UserAgent: r.UserAgent(),
+				})
 				return
 			}
 		}
@@ -431,6 +442,28 @@ func main() {
 			json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 		})
 
+		// Page analytics
+		r.Get("/page-analytics", func(w http.ResponseWriter, r *http.Request) {
+			userID := middleware.GetUserID(r)
+			stats, err := db.GetPageAnalytics(r.Context(), userID)
+			if err != nil {
+				http.Error(w, `{"error":"failed to get analytics"}`, http.StatusInternalServerError)
+				return
+			}
+			if stats == nil {
+				stats = []models.PageAnalytics{}
+			}
+			// Attach top referrers for each page (max 5)
+			for i := range stats {
+				refs, err := db.GetTopReferrers(r.Context(), userID, stats[i].Slug, 5)
+				if err == nil {
+					stats[i].TopReferrers = refs
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(stats)
+		})
+
 		// Page agents — returns agent IDs for a username (used by static page shell)
 		r.Get("/page-agents/{username}", pagesHandler.PageAgents)
 
@@ -468,6 +501,7 @@ func main() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		srv.Shutdown(shutdownCtx)
+		viewRecorder.Shutdown()
 	}()
 
 	log.Printf("Server starting on :%s", port)

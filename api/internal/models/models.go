@@ -95,6 +95,21 @@ type OAuthCallbackResponse struct {
 	User         User   `json:"user"`
 }
 
+// PageAnalytics holds aggregated analytics for a single page.
+type PageAnalytics struct {
+	Slug           string     `json:"slug"`
+	TotalViews     int64      `json:"total_views"`
+	UniqueVisitors int64      `json:"unique_visitors_30d"`
+	LastViewedAt   *time.Time `json:"last_viewed_at,omitempty"`
+	TopReferrers   []Referrer `json:"top_referrers,omitempty"`
+}
+
+// Referrer is a referrer source with its view count.
+type Referrer struct {
+	Source string `json:"source"`
+	Count  int64  `json:"count"`
+}
+
 // ValidScopes defines allowed token scopes.
 var ValidScopes = map[string]bool{
 	"manage:keys": true,

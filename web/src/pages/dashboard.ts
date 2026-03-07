@@ -2,6 +2,7 @@ import {
   API_BASE,
   getMe,
   listPagesViaRelay,
+  getPageAnalytics,
   listTokens,
   createToken,
   deleteToken,
@@ -10,6 +11,7 @@ import {
   setLoggedIn,
   type User,
   type Page,
+  type PageAnalytics,
   type Token,
   type Agent,
 } from "../lib/api";
@@ -177,23 +179,54 @@ async function renderPagesList(agents: Agent[], username: string, container: HTM
 
   pagesEl.innerHTML = '<p style="color:#656d76;">Loading pages from agent...</p>';
 
-  const pages = await listPagesViaRelay(onlineAgent.id);
+  const [pages, analyticsData] = await Promise.all([
+    listPagesViaRelay(onlineAgent.id),
+    getPageAnalytics().catch(() => [] as PageAnalytics[]),
+  ]);
 
   if (pages.length === 0) {
     pagesEl.innerHTML = '<p style="color:#656d76;">No pages yet. Use your AI agent to publish pages.</p>';
     return;
   }
 
-  pagesEl.innerHTML = pages.map((p: Page) => `
-    <div class="yb-dash-item">
-      <div>
-        <a href="/p/${esc(username)}/${esc(p.slug)}" target="_blank" style="color:#58a6ff;text-decoration:none;font-weight:600;">${esc(p.title || p.slug)}</a>
-        ${p.public ? '<span style="color:#3fb950;font-size:0.75rem;background:#1a2e1d;padding:0.1rem 0.4rem;border-radius:4px;margin-left:0.4rem;">public</span>' : ''}
-        <span style="color:#656d76;margin-left:0.5rem;font-size:0.8rem;">/${esc(username)}/${esc(p.slug)}</span>
+  // Build lookup map: slug -> analytics
+  const analyticsMap = new Map<string, PageAnalytics>();
+  for (const a of analyticsData) {
+    analyticsMap.set(a.slug, a);
+  }
+
+  pagesEl.innerHTML = pages.map((p: Page) => {
+    const stats = p.public ? analyticsMap.get(p.slug) : null;
+    let statsHtml = '';
+    if (stats && stats.total_views > 0) {
+      const parts = [`${stats.total_views} view${stats.total_views !== 1 ? 's' : ''}`];
+      if (stats.unique_visitors_30d > 0) {
+        parts.push(`${stats.unique_visitors_30d} unique`);
+      }
+      if (stats.top_referrers && stats.top_referrers.length > 0) {
+        // Show top referrer domain only
+        try {
+          const refUrl = new URL(stats.top_referrers[0].source);
+          parts.push(`via ${refUrl.hostname}`);
+        } catch {
+          parts.push(`via ${stats.top_referrers[0].source}`);
+        }
+      }
+      statsHtml = `<div style="color:#656d76;font-size:0.75rem;margin-top:0.2rem;">${parts.join(' · ')}</div>`;
+    }
+    return `
+    <div class="yb-dash-item" style="flex-direction:column;align-items:stretch;gap:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <a href="/p/${esc(username)}/${esc(p.slug)}" target="_blank" style="color:#58a6ff;text-decoration:none;font-weight:600;">${esc(p.title || p.slug)}</a>
+          ${p.public ? '<span style="color:#3fb950;font-size:0.75rem;background:#1a2e1d;padding:0.1rem 0.4rem;border-radius:4px;margin-left:0.4rem;">public</span>' : ''}
+          <span style="color:#656d76;margin-left:0.5rem;font-size:0.8rem;">/${esc(username)}/${esc(p.slug)}</span>
+        </div>
+        <button class="delete-page yb-btn-danger" data-slug="${esc(p.slug)}" data-agent-id="${onlineAgent.id}">Delete</button>
       </div>
-      <button class="delete-page yb-btn-danger" data-slug="${esc(p.slug)}" data-agent-id="${onlineAgent.id}">Delete</button>
-    </div>
-  `).join("");
+      ${statsHtml}
+    </div>`;
+  }).join("");
 
   // Bind delete handlers
   pagesEl.querySelectorAll(".delete-page").forEach((btn) => {

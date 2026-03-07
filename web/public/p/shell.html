@@ -102,7 +102,9 @@
 
             try {
                 var publicResp = await fetch(API + '/api/public-page/' +
-                    encodeURIComponent(username) + '/' + encodeURIComponent(slug));
+                    encodeURIComponent(username) + '/' + encodeURIComponent(slug), {
+                    headers: { 'X-Referrer': document.referrer || '' }
+                });
                 if (publicResp.ok) {
                     pageData = await publicResp.json();
                     isPublic = true;
