@@ -15,11 +15,12 @@ export function DashboardPage() {
   const { agents } = useAgentStream();
   const { getStatus, pairAgent, removeAgent } = usePairingStatus(agents);
   const {
-    pages,
+    agentPages,
     analytics,
     loading: pagesLoading,
     deletePage,
-    onlineAgentId,
+    hasAgent,
+    anyOnline,
   } = usePages(agents, getStatus);
   const {
     tokens,
@@ -55,11 +56,6 @@ export function DashboardPage() {
     );
   }
 
-  const hasAgent = agents.some(
-    (a) => a.is_online && getStatus(a.id) === "paired"
-  );
-  const anyOnline = agents.some((a) => a.is_online);
-
   return (
     <>
       <style>{dashboardStyles}</style>
@@ -75,11 +71,10 @@ export function DashboardPage() {
             <span className="yb-icon">{"\u25E7"}</span> Pages
           </h2>
           <PagesList
-            pages={pages}
+            agentPages={agentPages}
             analytics={analytics}
             loading={pagesLoading}
             username={user.username}
-            agentId={onlineAgentId}
             hasAgent={hasAgent}
             anyOnline={anyOnline}
             onAnalytics={setAnalyticsSlug}

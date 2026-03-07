@@ -7,6 +7,7 @@ export function PageCard({
   agentId,
   onAnalytics,
   onDelete,
+  duplicateWarning,
 }: {
   page: Page;
   username: string;
@@ -14,6 +15,7 @@ export function PageCard({
   agentId: number;
   onAnalytics: (slug: string) => void;
   onDelete: (slug: string, agentId: number) => void;
+  duplicateWarning?: string;
 }) {
   let statsText = "";
   if (page.public) {
@@ -63,6 +65,20 @@ export function PageCard({
               }}
             >
               public
+            </span>
+          )}
+          {duplicateWarning && (
+            <span
+              style={{
+                color: "#d29922",
+                fontSize: "0.75rem",
+                background: "#2d2a1d",
+                padding: "0.1rem 0.4rem",
+                borderRadius: 4,
+              }}
+              title={duplicateWarning}
+            >
+              duplicate
             </span>
           )}
         </div>

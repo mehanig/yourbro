@@ -12,47 +12,60 @@ import {
 } from "../lib/crypto";
 import { deriveE2EKey, encryptedRelay, x25519KeyId } from "../lib/e2e";
 
+export interface AgentPages {
+  agent: Agent;
+  pages: Page[];
+}
+
 export function usePages(
   agents: Agent[],
   getStatus: (id: number) => string | undefined
 ) {
-  const [pages, setPages] = useState<Page[]>([]);
+  const [agentPages, setAgentPages] = useState<AgentPages[]>([]);
   const [analytics, setAnalytics] = useState<Map<string, PageAnalytics>>(
     new Map()
   );
   const [loading, setLoading] = useState(true);
-  const [loadedAgentId, setLoadedAgentId] = useState<number | null>(null);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
 
-  // Find first online paired agent
-  const onlineAgent = agents.find(
+  // All online paired agents
+  const pairedOnline = agents.filter(
     (a) => a.is_online && getStatus(a.id) === "paired"
   );
 
+  // Stable key to detect when the set of paired agents changes
+  const agentKey = pairedOnline.map((a) => a.id).sort().join(",");
+
   useEffect(() => {
-    if (!onlineAgent) {
+    if (pairedOnline.length === 0) {
+      setAgentPages([]);
       setLoading(false);
       return;
     }
-    if (loadedAgentId === onlineAgent.id) return;
+    if (loadedKey === agentKey) return;
 
     setLoading(true);
     Promise.all([
-      listPagesViaRelay(onlineAgent.id),
+      Promise.all(
+        pairedOnline.map(async (agent) => ({
+          agent,
+          pages: await listPagesViaRelay(agent.id),
+        }))
+      ),
       getPageAnalytics().catch(() => [] as PageAnalytics[]),
-    ]).then(([p, a]) => {
-      setPages(p);
+    ]).then(([results, a]) => {
+      setAgentPages(results);
       const map = new Map<string, PageAnalytics>();
       for (const item of a) map.set(item.slug, item);
       setAnalytics(map);
-      setLoadedAgentId(onlineAgent.id);
+      setLoadedKey(agentKey);
       setLoading(false);
     });
-  }, [onlineAgent, loadedAgentId]);
+  }, [agentKey, loadedKey]);
 
   const reload = useCallback(() => {
-    if (!onlineAgent) return;
-    setLoadedAgentId(null); // triggers refetch
-  }, [onlineAgent]);
+    setLoadedKey(null);
+  }, []);
 
   const deletePage = useCallback(
     async (slug: string, agentId: number): Promise<{ ok: boolean; error?: string }> => {
@@ -80,5 +93,8 @@ export function usePages(
     [reload]
   );
 
-  return { pages, analytics, loading, deletePage, onlineAgentId: onlineAgent?.id ?? null };
+  const hasAgent = pairedOnline.length > 0;
+  const anyOnline = agents.some((a) => a.is_online);
+
+  return { agentPages, analytics, loading, deletePage, hasAgent, anyOnline };
 }
