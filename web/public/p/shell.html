@@ -134,10 +134,13 @@
                   try {
                     _dbg += 'path=BLOB files=' + Object.keys(pageData.files).length + '\n';
                     // No-SW fallback: blob URLs + fetch/XHR override
+                    // Strategy: create blob URLs for all files, rewrite only HTML
+                    // src/href attributes (via DOM parsing), inject fetch/XHR
+                    // override for dynamic JS requests. Never modify JS/CSS source.
                     var files = pageData.files;
                     var blobMap = {};
 
-                    // Pass 1: create blob URLs for binary files
+                    // Create blob URLs for all non-HTML files (no source rewriting)
                     for (var name in files) {
                         if (name === 'index.html') continue;
                         var content = files[name];
@@ -146,53 +149,57 @@
                             var bytes = new Uint8Array(bin.length);
                             for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
                             blobMap[name] = URL.createObjectURL(new Blob([bytes], { type: fileMime(name) }));
+                        } else if (typeof content === 'string') {
+                            blobMap[name] = URL.createObjectURL(new Blob([content], { type: fileMime(name) }));
                         }
                     }
 
-                    // Pass 2: text files — rewrite refs to binary assets, then create blobs
-                    for (var name in files) {
-                        if (name === 'index.html') continue;
-                        var content = files[name];
-                        if (typeof content !== 'string' || content.substring(0, 7) === 'base64:') continue;
-                        var text = content;
-                        for (var ref in blobMap) {
-                            text = text.split('./' + ref).join(blobMap[ref]);
-                            text = text.split(ref).join(blobMap[ref]);
-                        }
-                        blobMap[name] = URL.createObjectURL(new Blob([text], { type: fileMime(name) }));
-                    }
+                    // Parse HTML and rewrite only src/href attributes (precise, no string mangling)
+                    var dp = new DOMParser();
+                    var doc = dp.parseFromString(files['index.html'], 'text/html');
 
-                    // Rewrite index.html — replace file refs with blob URLs
-                    var html = files['index.html'];
-                    for (var name in blobMap) {
-                        html = html.split('./' + name).join(blobMap[name]);
-                        html = html.split(name).join(blobMap[name]);
+                    function resolveAttr(el, attr) {
+                        var val = el.getAttribute(attr);
+                        if (!val) return;
+                        var clean = val.replace(/^\.\//, '');
+                        if (blobMap[clean]) el.setAttribute(attr, blobMap[clean]);
                     }
+                    doc.querySelectorAll('[src]').forEach(function(el) { resolveAttr(el, 'src'); });
+                    doc.querySelectorAll('[href]').forEach(function(el) { resolveAttr(el, 'href'); });
+                    doc.querySelectorAll('[poster]').forEach(function(el) { resolveAttr(el, 'poster'); });
 
-                    // Inject fetch/XHR override for dynamic requests from page JS
-                    var mapJson = JSON.stringify(blobMap);
-                    var override = '<script>(function(){var m=' + mapJson + ';' +
+                    // Inject fetch/XHR override as first script in <head>
+                    var overrideEl = doc.createElement('script');
+                    overrideEl.textContent = '(function(){' +
+                        'var m=' + JSON.stringify(blobMap) + ';' +
+                        'function r(u){return u.replace(/^\\.\\//,"");}' +
+                        // Override fetch
                         'var F=window.fetch;window.fetch=function(u,o){' +
-                        'var k=typeof u==="string"?u:u.url;k=k.replace(/^\\.\\//,"");' +
+                        'var k=r(typeof u==="string"?u:u.url);' +
                         'if(m[k])return F(m[k],o);return F.apply(this,arguments)};' +
+                        // Override XHR
                         'var X=XMLHttpRequest.prototype.open;' +
                         'XMLHttpRequest.prototype.open=function(){' +
-                        'var u=arguments[1];if(typeof u==="string"){var k=u.replace(/^\\.\\//,"");if(m[k])arguments[1]=m[k]}' +
-                        'return X.apply(this,arguments)}' +
-                        '})()<\/script>';
+                        'var u=arguments[1];if(typeof u==="string"){var k=r(u);if(m[k])arguments[1]=m[k]}' +
+                        'return X.apply(this,arguments)};' +
+                        // Override dynamic src/href sets on DOM elements
+                        '["src","href"].forEach(function(a){' +
+                        '["HTMLImageElement","HTMLScriptElement","HTMLLinkElement","HTMLSourceElement","HTMLMediaElement"].forEach(function(t){' +
+                        'var P=window[t]&&window[t].prototype;if(!P)return;' +
+                        'var d=Object.getOwnPropertyDescriptor(P,a);if(!d||!d.set)return;' +
+                        'Object.defineProperty(P,a,{set:function(v){' +
+                        'var k=r(typeof v==="string"?v:v);if(m[k])return d.set.call(this,m[k]);' +
+                        'return d.set.call(this,v)},get:d.get,configurable:true})})})' +
+                        '})()';
+                    var head = doc.head || doc.documentElement;
+                    head.insertBefore(overrideEl, head.firstChild);
 
-                    var headIdx = html.toLowerCase().indexOf('<head>');
-                    if (headIdx !== -1) {
-                        html = html.substring(0, headIdx + 6) + override + html.substring(headIdx + 6);
-                    } else {
-                        html = override + html;
-                    }
+                    var html = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
 
-                    var blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
                     _dbg += 'blobs=' + Object.keys(blobMap).join(',') + '\n';
                     _dbg += 'html=' + html.length + 'b\n';
                     _dbg += html.substring(0, 200) + '\n';
-                    iframe.src = blobUrl;
+                    iframe.srcdoc = html;
                     iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
                   } catch(e) {
                     _dbg += 'BLOB ERROR: ' + e.message + '\n';
