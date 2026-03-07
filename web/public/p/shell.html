@@ -99,15 +99,22 @@
             // ==========================================
             var pageData = null;
             var isPublic = false;
+            var debugInfo = '';
 
             try {
-                var publicResp = await fetch(API + '/api/public-page/' +
-                    encodeURIComponent(username) + '/' + encodeURIComponent(slug));
+                var publicUrl = API + '/api/public-page/' +
+                    encodeURIComponent(username) + '/' + encodeURIComponent(slug);
+                debugInfo += 'fetch: ' + publicUrl + '\n';
+                var publicResp = await fetch(publicUrl);
+                debugInfo += 'status: ' + publicResp.status + '\n';
                 if (publicResp.ok) {
                     pageData = await publicResp.json();
                     isPublic = true;
                 }
-            } catch(e) { console.error('Public page fetch failed:', e); }
+            } catch(e) {
+                debugInfo += 'error: ' + e.message + '\n';
+                console.error('Public page fetch failed:', e);
+            }
 
             // If public worked, render and exit
             if (isPublic && pageData && pageData.files && pageData.files['index.html']) {
@@ -137,6 +144,7 @@
                 document.body.innerHTML = '<div class="status-msg">' +
                     'This page is not available.' +
                     '<div class="subtitle">It may be private or the author\'s agent may be offline.</div>' +
+                    '<pre style="font-size:11px;color:#555;margin-top:12px;text-align:left;max-width:400px;word-break:break-all">' + debugInfo + 'ua: ' + navigator.userAgent.substring(0,80) + '</pre>' +
                     '<a href="/">Sign in</a></div>';
                 return;
             }
