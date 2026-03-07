@@ -29,13 +29,19 @@
                 document.body.innerHTML = '<div class="status-msg">Invalid page URL.</div>';
                 return;
             }
+
+            // Guard: if path is /p/assets/..., the SW didn't intercept the iframe request
+            // and Cloudflare rewrote it back to shell.html. Don't re-run — show nothing.
+            if (parts[1] === 'assets') return;
+
             var username = decodeURIComponent(parts[1]);
             var slug = decodeURIComponent(parts[2]);
 
             document.title = slug + ' \u2014 yourbro';
 
-            // Register Service Worker for asset serving and await activation
+            // Register Service Worker for asset serving and await control
             var swReady = null;
+            var swControlling = false;
             if ('serviceWorker' in navigator) {
                 try {
                     var swReg = await navigator.serviceWorker.register('/p/page-sw.js', { scope: '/p/' });
@@ -51,6 +57,19 @@
                             });
                         });
                     }
+                    // Wait for SW to actually control this page (clients.claim())
+                    if (navigator.serviceWorker.controller) {
+                        swControlling = true;
+                    } else {
+                        await new Promise(function(resolve) {
+                            var timeout = setTimeout(function() { resolve(); }, 3000);
+                            navigator.serviceWorker.addEventListener('controllerchange', function() {
+                                clearTimeout(timeout);
+                                swControlling = true;
+                                resolve();
+                            });
+                        });
+                    }
                 } catch(e) {
                     console.warn('SW registration failed:', e);
                 }
@@ -62,7 +81,7 @@
                 document.title = pageTitle + ' \u2014 yourbro';
 
                 // Send file bundle to Service Worker for caching
-                if (swReady) {
+                if (swReady && swControlling) {
                     try {
                         var reg = await swReady;
                         var sw = reg.active;
