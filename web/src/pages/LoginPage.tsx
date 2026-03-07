@@ -13,6 +13,7 @@ export function LoginPage() {
           .yb-steps{flex-direction:column !important;}
           .yb-features{grid-template-columns:1fr !important;}
           .yb-hero h1{font-size:2.5rem !important;}
+          .yb-hero{padding-top:2.5rem !important;}
           .yb-hero-image{max-width:100% !important;}
           .yb-step{padding:2rem 1.5rem !important;border-right:none !important;border-bottom:1px solid #30363d !important;}
           .yb-step:last-child{border-bottom:none !important;}
