@@ -74,6 +74,7 @@
                     console.warn('SW registration failed:', e);
                 }
             }
+            var _dbg = 'SW: ready=' + !!swReady + ' ctrl=' + swControlling + '\n';
 
             // MIME type lookup (matches page-sw.js)
             var MIMES = {
@@ -128,7 +129,10 @@
                     // SW path — serves files from cache
                     iframe.src = '/p/assets/' + slug + '/index.html';
                     iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+                    _dbg += 'path=SW\n';
                 } else {
+                  try {
+                    _dbg += 'path=BLOB files=' + Object.keys(pageData.files).length + '\n';
                     // No-SW fallback: blob URLs + fetch/XHR override
                     var files = pageData.files;
                     var blobMap = {};
@@ -184,9 +188,22 @@
                         html = override + html;
                     }
 
-                    iframe.src = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+                    var blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+                    _dbg += 'blobs=' + Object.keys(blobMap).join(',') + '\n';
+                    _dbg += 'html=' + html.length + 'b\n';
+                    _dbg += html.substring(0, 200) + '\n';
+                    iframe.src = blobUrl;
                     iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+                  } catch(e) {
+                    _dbg += 'BLOB ERROR: ' + e.message + '\n';
+                  }
                 }
+
+                // Debug overlay (temporary)
+                var dbgEl = document.createElement('pre');
+                dbgEl.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#000;color:#0f0;font-size:11px;padding:8px;max-height:40vh;overflow:auto;white-space:pre-wrap;word-break:break-all';
+                dbgEl.textContent = _dbg;
+                document.body.appendChild(dbgEl);
 
                 container.appendChild(iframe);
                 document.body.appendChild(container);
