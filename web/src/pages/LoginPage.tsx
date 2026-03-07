@@ -91,6 +91,7 @@ export function LoginPage() {
             gap: "1rem",
             alignItems: "center",
             marginTop: "0.5rem",
+            paddingBottom: "2rem",
             flexWrap: "wrap",
             justifyContent: "center",
           }}
