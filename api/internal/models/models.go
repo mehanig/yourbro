@@ -110,6 +110,23 @@ type Referrer struct {
 	Count  int64  `json:"count"`
 }
 
+// PageDetailedAnalytics holds full analytics for a single page (used by modal).
+type PageDetailedAnalytics struct {
+	Slug           string         `json:"slug"`
+	TotalViews     int64          `json:"total_views"`
+	UniqueVisitors int64          `json:"unique_visitors_30d"`
+	LastViewedAt   *time.Time     `json:"last_viewed_at,omitempty"`
+	DailyViews     []DailyView    `json:"daily_views"`
+	TopReferrers   []Referrer     `json:"top_referrers"`
+}
+
+// DailyView holds view counts for a single day.
+type DailyView struct {
+	Date         string `json:"date"` // YYYY-MM-DD
+	Views        int64  `json:"views"`
+	UniqueViews  int64  `json:"unique_views"`
+}
+
 // ValidScopes defines allowed token scopes.
 var ValidScopes = map[string]bool{
 	"manage:keys": true,

@@ -310,6 +310,36 @@ func (db *DB) GetTopReferrers(ctx context.Context, userID int64, slug string, li
 	return refs, nil
 }
 
+func (db *DB) GetPageDailyViews(ctx context.Context, userID int64, slug string, days int) ([]models.DailyView, error) {
+	rows, err := db.Pool.Query(ctx, `
+		SELECT
+			viewed_at::date AS day,
+			COUNT(*) AS views,
+			COUNT(DISTINCT ip_hash) AS unique_views
+		FROM page_views
+		WHERE user_id = $1 AND slug = $2 AND NOT is_bot
+		  AND viewed_at > NOW() - make_interval(days => $3)
+		GROUP BY day
+		ORDER BY day DESC
+	`, userID, slug, days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []models.DailyView
+	for rows.Next() {
+		var dv models.DailyView
+		var day time.Time
+		if err := rows.Scan(&day, &dv.Views, &dv.UniqueViews); err != nil {
+			return nil, err
+		}
+		dv.Date = day.Format("2006-01-02")
+		results = append(results, dv)
+	}
+	return results, nil
+}
+
 // RunMigrations runs SQL migration files in order.
 func (db *DB) RunMigrations(ctx context.Context, migrationsDir string) error {
 	// Create migrations tracking table

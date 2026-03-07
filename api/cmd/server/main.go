@@ -464,6 +464,52 @@ func main() {
 			json.NewEncoder(w).Encode(stats)
 		})
 
+		// Per-page detailed analytics (for modal)
+		r.Get("/page-analytics/{slug}", func(w http.ResponseWriter, r *http.Request) {
+			userID := middleware.GetUserID(r)
+			slug := chi.URLParam(r, "slug")
+
+			stats, err := db.GetPageAnalytics(r.Context(), userID)
+			if err != nil {
+				http.Error(w, `{"error":"failed to get analytics"}`, http.StatusInternalServerError)
+				return
+			}
+			// Find the specific page
+			var pageStats *models.PageAnalytics
+			for i := range stats {
+				if stats[i].Slug == slug {
+					pageStats = &stats[i]
+					break
+				}
+			}
+
+			result := models.PageDetailedAnalytics{
+				Slug:         slug,
+				DailyViews:   []models.DailyView{},
+				TopReferrers: []models.Referrer{},
+			}
+			if pageStats != nil {
+				result.TotalViews = pageStats.TotalViews
+				result.UniqueVisitors = pageStats.UniqueVisitors
+				result.LastViewedAt = pageStats.LastViewedAt
+			}
+
+			// Daily views (last 30 days)
+			daily, err := db.GetPageDailyViews(r.Context(), userID, slug, 30)
+			if err == nil && daily != nil {
+				result.DailyViews = daily
+			}
+
+			// Top referrers (top 10)
+			refs, err := db.GetTopReferrers(r.Context(), userID, slug, 10)
+			if err == nil && refs != nil {
+				result.TopReferrers = refs
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(result)
+		})
+
 		// Page agents — returns agent IDs for a username (used by static page shell)
 		r.Get("/page-agents/{username}", pagesHandler.PageAgents)
 
