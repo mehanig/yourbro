@@ -116,7 +116,7 @@ function CreateTokenModal({
     <>
       <style>{modalStyles}</style>
       <div
-        className="yb-modal-overlay"
+        className="yb-token-overlay"
         onClick={(e) => {
           if (e.target === e.currentTarget) onClose();
         }}
@@ -206,6 +206,16 @@ function CreateTokenModal({
 }
 
 const modalStyles = `
+  .yb-token-overlay {
+    position: fixed !important;
+    top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+    background: rgba(0,0,0,0.75) !important;
+    z-index: 9999 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 1rem !important;
+  }
   .yb-token-modal {
     background: #161b22 !important;
     border: 1px solid #30363d !important;
