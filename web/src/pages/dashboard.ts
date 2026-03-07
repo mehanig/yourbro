@@ -199,43 +199,36 @@ async function renderPagesList(agents: Agent[], username: string, container: HTM
 
   pagesEl.innerHTML = pages.map((p: Page) => {
     const stats = p.public ? analyticsMap.get(p.slug) : null;
-    let statsHtml = '';
-    if (p.public && (!stats || stats.total_views === 0)) {
-      statsHtml = `<div class="yb-page-stats" data-slug="${esc(p.slug)}" style="color:#656d76;font-size:0.75rem;margin-top:0.2rem;cursor:pointer;" title="Click for detailed analytics">0 views</div>`;
-    } else if (stats && stats.total_views > 0) {
-      const parts = [`${stats.total_views} view${stats.total_views !== 1 ? 's' : ''}`];
-      if (stats.unique_visitors_30d > 0) {
-        parts.push(`${stats.unique_visitors_30d} unique`);
+    let statsText = '';
+    if (p.public) {
+      if (stats && stats.total_views > 0) {
+        const parts = [`${stats.total_views} view${stats.total_views !== 1 ? 's' : ''}`];
+        if (stats.unique_visitors_30d > 0) parts.push(`${stats.unique_visitors_30d} unique`);
+        statsText = parts.join(' \u00b7 ');
+      } else {
+        statsText = '0 views';
       }
-      if (stats.top_referrers && stats.top_referrers.length > 0) {
-        // Show top referrer domain only
-        try {
-          const refUrl = new URL(stats.top_referrers[0].source);
-          parts.push(`via ${refUrl.hostname}`);
-        } catch {
-          parts.push(`via ${stats.top_referrers[0].source}`);
-        }
-      }
-      statsHtml = `<div class="yb-page-stats" data-slug="${esc(p.slug)}" style="color:#656d76;font-size:0.75rem;margin-top:0.2rem;cursor:pointer;" title="Click for detailed analytics">${parts.join(' \u00b7 ')}</div>`;
     }
     return `
-    <div class="yb-dash-item" style="flex-direction:column;align-items:stretch;gap:0;">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <div>
+    <div class="yb-dash-item">
+      <div style="min-width:0;">
+        <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">
           <a href="/p/${esc(username)}/${esc(p.slug)}" target="_blank" style="color:#58a6ff;text-decoration:none;font-weight:600;">${esc(p.title || p.slug)}</a>
-          ${p.public ? '<span style="color:#3fb950;font-size:0.75rem;background:#1a2e1d;padding:0.1rem 0.4rem;border-radius:4px;margin-left:0.4rem;">public</span>' : ''}
-          <span style="color:#656d76;margin-left:0.5rem;font-size:0.8rem;">/${esc(username)}/${esc(p.slug)}</span>
+          ${p.public ? '<span style="color:#3fb950;font-size:0.75rem;background:#1a2e1d;padding:0.1rem 0.4rem;border-radius:4px;">public</span>' : ''}
         </div>
+        <div style="color:#656d76;font-size:0.8rem;margin-top:0.15rem;">/${esc(username)}/${esc(p.slug)}${statsText ? ' \u00b7 ' + statsText : ''}</div>
+      </div>
+      <div style="display:flex;gap:0.4rem;flex-shrink:0;">
+        ${p.public ? `<button class="analytics-btn yb-btn-secondary" data-slug="${esc(p.slug)}" style="font-size:0.8rem;padding:0.3rem 0.6rem;">Analytics</button>` : ''}
         <button class="delete-page yb-btn-danger" data-slug="${esc(p.slug)}" data-agent-id="${onlineAgent.id}">Delete</button>
       </div>
-      ${statsHtml}
     </div>`;
   }).join("");
 
   // Bind analytics modal handlers
-  pagesEl.querySelectorAll(".yb-page-stats").forEach((el) => {
-    el.addEventListener("click", () => {
-      const slug = (el as HTMLElement).dataset.slug;
+  pagesEl.querySelectorAll(".analytics-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const slug = (btn as HTMLElement).dataset.slug;
       if (slug) openAnalyticsModal(slug);
     });
   });
