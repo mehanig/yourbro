@@ -102,14 +102,12 @@
 
             try {
                 var publicResp = await fetch(API + '/api/public-page/' +
-                    encodeURIComponent(username) + '/' + encodeURIComponent(slug), {
-                    headers: { 'X-Referrer': document.referrer || '' }
-                });
+                    encodeURIComponent(username) + '/' + encodeURIComponent(slug));
                 if (publicResp.ok) {
                     pageData = await publicResp.json();
                     isPublic = true;
                 }
-            } catch(e) { /* network error */ }
+            } catch(e) { console.error('Public page fetch failed:', e); }
 
             // If public worked, render and exit
             if (isPublic && pageData && pageData.files && pageData.files['index.html']) {
