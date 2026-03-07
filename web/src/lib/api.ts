@@ -83,6 +83,32 @@ export async function listPagesViaRelay(agentId: number): Promise<Page[]> {
   }
 }
 
+// Page Analytics
+export interface PageAnalytics {
+  slug: string;
+  total_views: number;
+  unique_visitors_30d: number;
+  last_viewed_at?: string;
+  top_referrers?: { source: string; count: number }[];
+}
+
+export function getPageAnalytics(): Promise<PageAnalytics[]> {
+  return request("/api/page-analytics");
+}
+
+export interface PageDetailedAnalytics {
+  slug: string;
+  total_views: number;
+  unique_visitors_30d: number;
+  last_viewed_at?: string;
+  daily_views: { date: string; views: number; unique_views: number }[];
+  top_referrers: { source: string; count: number }[];
+}
+
+export function getPageDetailedAnalytics(slug: string): Promise<PageDetailedAnalytics> {
+  return request(`/api/page-analytics/${encodeURIComponent(slug)}`);
+}
+
 // Tokens
 export interface Token {
   id: number;

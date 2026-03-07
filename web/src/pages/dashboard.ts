@@ -2,6 +2,8 @@ import {
   API_BASE,
   getMe,
   listPagesViaRelay,
+  getPageAnalytics,
+  getPageDetailedAnalytics,
   listTokens,
   createToken,
   deleteToken,
@@ -10,6 +12,8 @@ import {
   setLoggedIn,
   type User,
   type Page,
+  type PageAnalytics,
+  type PageDetailedAnalytics,
   type Token,
   type Agent,
 } from "../lib/api";
@@ -177,23 +181,64 @@ async function renderPagesList(agents: Agent[], username: string, container: HTM
 
   pagesEl.innerHTML = '<p style="color:#656d76;">Loading pages from agent...</p>';
 
-  const pages = await listPagesViaRelay(onlineAgent.id);
+  const [pages, analyticsData] = await Promise.all([
+    listPagesViaRelay(onlineAgent.id),
+    getPageAnalytics().catch(() => [] as PageAnalytics[]),
+  ]);
 
   if (pages.length === 0) {
     pagesEl.innerHTML = '<p style="color:#656d76;">No pages yet. Use your AI agent to publish pages.</p>';
     return;
   }
 
-  pagesEl.innerHTML = pages.map((p: Page) => `
-    <div class="yb-dash-item">
-      <div>
-        <a href="/p/${esc(username)}/${esc(p.slug)}" target="_blank" style="color:#58a6ff;text-decoration:none;font-weight:600;">${esc(p.title || p.slug)}</a>
-        ${p.public ? '<span style="color:#3fb950;font-size:0.75rem;background:#1a2e1d;padding:0.1rem 0.4rem;border-radius:4px;margin-left:0.4rem;">public</span>' : ''}
-        <span style="color:#656d76;margin-left:0.5rem;font-size:0.8rem;">/${esc(username)}/${esc(p.slug)}</span>
+  // Build lookup map: slug -> analytics
+  const analyticsMap = new Map<string, PageAnalytics>();
+  for (const a of analyticsData) {
+    analyticsMap.set(a.slug, a);
+  }
+
+  pagesEl.innerHTML = pages.map((p: Page) => {
+    const stats = p.public ? analyticsMap.get(p.slug) : null;
+    let statsHtml = '';
+    if (p.public && (!stats || stats.total_views === 0)) {
+      statsHtml = `<div class="yb-page-stats" data-slug="${esc(p.slug)}" style="color:#656d76;font-size:0.75rem;margin-top:0.2rem;cursor:pointer;" title="Click for detailed analytics">0 views</div>`;
+    } else if (stats && stats.total_views > 0) {
+      const parts = [`${stats.total_views} view${stats.total_views !== 1 ? 's' : ''}`];
+      if (stats.unique_visitors_30d > 0) {
+        parts.push(`${stats.unique_visitors_30d} unique`);
+      }
+      if (stats.top_referrers && stats.top_referrers.length > 0) {
+        // Show top referrer domain only
+        try {
+          const refUrl = new URL(stats.top_referrers[0].source);
+          parts.push(`via ${refUrl.hostname}`);
+        } catch {
+          parts.push(`via ${stats.top_referrers[0].source}`);
+        }
+      }
+      statsHtml = `<div class="yb-page-stats" data-slug="${esc(p.slug)}" style="color:#656d76;font-size:0.75rem;margin-top:0.2rem;cursor:pointer;" title="Click for detailed analytics">${parts.join(' \u00b7 ')}</div>`;
+    }
+    return `
+    <div class="yb-dash-item" style="flex-direction:column;align-items:stretch;gap:0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <a href="/p/${esc(username)}/${esc(p.slug)}" target="_blank" style="color:#58a6ff;text-decoration:none;font-weight:600;">${esc(p.title || p.slug)}</a>
+          ${p.public ? '<span style="color:#3fb950;font-size:0.75rem;background:#1a2e1d;padding:0.1rem 0.4rem;border-radius:4px;margin-left:0.4rem;">public</span>' : ''}
+          <span style="color:#656d76;margin-left:0.5rem;font-size:0.8rem;">/${esc(username)}/${esc(p.slug)}</span>
+        </div>
+        <button class="delete-page yb-btn-danger" data-slug="${esc(p.slug)}" data-agent-id="${onlineAgent.id}">Delete</button>
       </div>
-      <button class="delete-page yb-btn-danger" data-slug="${esc(p.slug)}" data-agent-id="${onlineAgent.id}">Delete</button>
-    </div>
-  `).join("");
+      ${statsHtml}
+    </div>`;
+  }).join("");
+
+  // Bind analytics modal handlers
+  pagesEl.querySelectorAll(".yb-page-stats").forEach((el) => {
+    el.addEventListener("click", () => {
+      const slug = (el as HTMLElement).dataset.slug;
+      if (slug) openAnalyticsModal(slug);
+    });
+  });
 
   // Bind delete handlers
   pagesEl.querySelectorAll(".delete-page").forEach((btn) => {
@@ -306,6 +351,114 @@ function bindPairHandlers(agents: Agent[], user: User, container: HTMLElement) {
       }
     });
   });
+}
+
+/** Open analytics modal for a page slug. */
+async function openAnalyticsModal(slug: string) {
+  // Remove existing modal if any
+  document.getElementById("yb-analytics-modal")?.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "yb-analytics-modal";
+  overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:1rem;";
+  overlay.innerHTML = `
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;padding:1.75rem;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;">
+        <h2 style="margin:0;font-size:1.1rem;font-weight:700;">Analytics: ${esc(slug)}</h2>
+        <button id="yb-modal-close" style="background:none;border:none;color:#656d76;font-size:1.4rem;cursor:pointer;padding:0.2rem 0.5rem;">&times;</button>
+      </div>
+      <p style="color:#656d76;">Loading analytics...</p>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  // Close handlers
+  const close = () => overlay.remove();
+  document.getElementById("yb-modal-close")!.addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+  try {
+    const data: PageDetailedAnalytics = await getPageDetailedAnalytics(slug);
+    const content = overlay.querySelector("div > div:first-child")?.parentElement;
+    if (!content) return;
+
+    // Summary stats
+    let lastViewed = "Never";
+    if (data.last_viewed_at) {
+      const d = new Date(data.last_viewed_at);
+      const now = Date.now();
+      const diff = now - d.getTime();
+      if (diff < 3600000) lastViewed = `${Math.floor(diff / 60000)}m ago`;
+      else if (diff < 86400000) lastViewed = `${Math.floor(diff / 3600000)}h ago`;
+      else lastViewed = d.toLocaleDateString();
+    }
+
+    // Build daily views bar chart (ASCII-style with divs)
+    let dailyHtml = '<p style="color:#656d76;font-size:0.85rem;">No daily data yet.</p>';
+    if (data.daily_views && data.daily_views.length > 0) {
+      const maxViews = Math.max(...data.daily_views.map(d => d.views));
+      const maxBarWidth = 200; // px
+      dailyHtml = data.daily_views.slice(0, 14).map(dv => {
+        const barWidth = maxViews > 0 ? Math.max(2, Math.round((dv.views / maxViews) * maxBarWidth)) : 2;
+        const dateLabel = new Date(dv.date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        return `
+          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem;">
+            <span style="color:#8b949e;font-size:0.8rem;min-width:50px;text-align:right;">${dateLabel}</span>
+            <div style="background:#1f6feb;height:16px;width:${barWidth}px;border-radius:3px;"></div>
+            <span style="color:#e6edf3;font-size:0.8rem;">${dv.views}</span>
+            <span style="color:#656d76;font-size:0.75rem;">(${dv.unique_views} unique)</span>
+          </div>`;
+      }).join("");
+    }
+
+    // Build referrers table
+    let refsHtml = '<p style="color:#656d76;font-size:0.85rem;">No referrer data yet.</p>';
+    if (data.top_referrers && data.top_referrers.length > 0) {
+      const totalRefViews = data.top_referrers.reduce((sum, r) => sum + r.count, 0);
+      refsHtml = data.top_referrers.map(r => {
+        let label = r.source || "(direct)";
+        try { label = new URL(r.source).hostname; } catch { /* use raw */ }
+        const pct = totalRefViews > 0 ? Math.round((r.count / totalRefViews) * 100) : 0;
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:0.35rem 0;border-bottom:1px solid #21262d;">
+            <span style="color:#e6edf3;font-size:0.85rem;">${esc(label)}</span>
+            <span style="color:#8b949e;font-size:0.85rem;">${r.count} <span style="color:#656d76;">(${pct}%)</span></span>
+          </div>`;
+      }).join("");
+    }
+
+    content.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem;">
+        <h2 style="margin:0;font-size:1.1rem;font-weight:700;">Analytics: ${esc(slug)}</h2>
+        <button id="yb-modal-close" style="background:none;border:none;color:#656d76;font-size:1.4rem;cursor:pointer;padding:0.2rem 0.5rem;">&times;</button>
+      </div>
+
+      <div style="display:flex;gap:1.5rem;margin-bottom:1.5rem;">
+        <div>
+          <div style="color:#656d76;font-size:0.8rem;">Total views</div>
+          <div style="font-size:1.5rem;font-weight:700;color:#e6edf3;">${data.total_views}</div>
+        </div>
+        <div>
+          <div style="color:#656d76;font-size:0.8rem;">Unique (30d)</div>
+          <div style="font-size:1.5rem;font-weight:700;color:#e6edf3;">${data.unique_visitors_30d}</div>
+        </div>
+        <div>
+          <div style="color:#656d76;font-size:0.8rem;">Last viewed</div>
+          <div style="font-size:1rem;font-weight:600;color:#8b949e;margin-top:0.3rem;">${lastViewed}</div>
+        </div>
+      </div>
+
+      <h3 style="font-size:0.95rem;font-weight:600;color:#e6edf3;margin:0 0 0.75rem;">Views (last 14 days)</h3>
+      ${dailyHtml}
+
+      <h3 style="font-size:0.95rem;font-weight:600;color:#e6edf3;margin:1.25rem 0 0.75rem;">Top Referrers</h3>
+      ${refsHtml}
+    `;
+
+    document.getElementById("yb-modal-close")!.addEventListener("click", close);
+  } catch (err) {
+    const content = overlay.querySelector("div > p");
+    if (content) content.textContent = `Failed to load analytics: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }
 
 export async function renderDashboard(container: HTMLElement) {
