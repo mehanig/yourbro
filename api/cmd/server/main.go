@@ -390,7 +390,7 @@ func main() {
 				}
 			}
 			if req.ExpiresIn <= 0 {
-				req.ExpiresIn = 90
+				req.ExpiresIn = 3650
 			}
 
 			tokenStr, err := auth.GenerateAPIToken()

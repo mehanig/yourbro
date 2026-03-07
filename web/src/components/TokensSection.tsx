@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import type { Token, CreateTokenResponse } from "../lib/api";
 
 export function TokensSection({
@@ -12,26 +13,28 @@ export function TokensSection({
   onRevoke: (id: number) => void;
   onCreate: (name: string, scopes: string[]) => Promise<CreateTokenResponse>;
 }) {
-  const [showNew, setShowNew] = useState(false);
-  const [newToken, setNewToken] = useState<string | null>(
-    newlyCreated?.token ?? null
-  );
-  const [showForm, setShowForm] = useState(false);
+  const [showModal, setShowModal] = useState(false);
   const [tokenName, setTokenName] = useState("clawdbot");
   const [creating, setCreating] = useState(false);
+  const [createdToken, setCreatedToken] = useState<string | null>(
+    newlyCreated?.token ?? null
+  );
 
   const handleCreate = async () => {
     const name = tokenName.trim() || "clawdbot";
     setCreating(true);
     try {
       const resp = await onCreate(name, ["manage:keys"]);
-      setNewToken(resp.token);
-      setShowNew(true);
-      setShowForm(false);
-      setTokenName("clawdbot");
+      setCreatedToken(resp.token);
     } finally {
       setCreating(false);
     }
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setTokenName("clawdbot");
+    setCreatedToken(null);
   };
 
   return (
@@ -64,85 +67,165 @@ export function TokensSection({
           </button>
         </div>
       ))}
-      {!showForm ? (
-        <button
-          className="yb-btn-secondary"
-          style={{ marginTop: "0.75rem" }}
-          onClick={() => setShowForm(true)}
-        >
-          + New Token
-        </button>
-      ) : (
-        <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem", alignItems: "center" }}>
-          <input
-            type="text"
-            value={tokenName}
-            onChange={(e) => setTokenName(e.target.value)}
-            placeholder="Token name"
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !creating) handleCreate();
-              if (e.key === "Escape") { setShowForm(false); setTokenName("clawdbot"); }
-            }}
-            style={{
-              padding: "0.4rem 0.7rem",
-              background: "#0d1117",
-              border: "1px solid #30363d",
-              borderRadius: 6,
-              color: "#e6edf3",
-              fontSize: "0.85rem",
-              flex: 1,
-              outline: "none",
-            }}
-          />
-          <button
-            className="yb-btn-secondary"
-            onClick={handleCreate}
-            disabled={creating}
-          >
-            {creating ? "Creating..." : "Create"}
-          </button>
-          <button
-            className="yb-btn-secondary"
-            onClick={() => { setShowForm(false); setTokenName("clawdbot"); }}
-          >
-            Cancel
-          </button>
-        </div>
-      )}
-      {showNew && newToken && (
-        <div
-          style={{
-            marginTop: "1rem",
-            padding: "1rem",
-            background: "#0f1a10",
-            borderRadius: 8,
-          }}
-        >
-          <p
-            style={{
-              color: "#3fb950",
-              marginBottom: "0.5rem",
-              fontSize: "0.9rem",
-            }}
-          >
-            Token created! Copy it now — it won't be shown again:
-          </p>
-          <code
-            style={{
-              display: "block",
-              padding: "0.5rem",
-              background: "#0d1117",
-              borderRadius: 4,
-              wordBreak: "break-all",
-              color: "#3fb950",
-              fontSize: "0.85rem",
-            }}
-          >
-            {newToken}
-          </code>
-        </div>
+      <button
+        className="yb-btn-secondary"
+        style={{ marginTop: "0.75rem" }}
+        onClick={() => setShowModal(true)}
+      >
+        + New Token
+      </button>
+
+      {showModal && (
+        <CreateTokenModal
+          tokenName={tokenName}
+          onNameChange={setTokenName}
+          creating={creating}
+          createdToken={createdToken}
+          onCreate={handleCreate}
+          onClose={closeModal}
+        />
       )}
     </>
   );
 }
+
+function CreateTokenModal({
+  tokenName,
+  onNameChange,
+  creating,
+  createdToken,
+  onCreate,
+  onClose,
+}: {
+  tokenName: string;
+  onNameChange: (v: string) => void;
+  creating: boolean;
+  createdToken: string | null;
+  onCreate: () => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return createPortal(
+    <>
+      <style>{modalStyles}</style>
+      <div
+        className="yb-modal-overlay"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
+        <div className="yb-token-modal">
+          <div className="yb-token-modal-header">
+            <h2>{createdToken ? "Token Created" : "Create API Token"}</h2>
+            <button className="yb-modal-close" onClick={onClose}>
+              &times;
+            </button>
+          </div>
+
+          {!createdToken ? (
+            <>
+              <label style={{ color: "#8b949e", fontSize: "0.85rem", display: "block", marginBottom: "0.4rem" }}>
+                Token name
+              </label>
+              <input
+                type="text"
+                value={tokenName}
+                onChange={(e) => onNameChange(e.target.value)}
+                placeholder="e.g. clawdbot"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !creating) onCreate();
+                }}
+                style={{
+                  width: "100%",
+                  padding: "0.5rem 0.75rem",
+                  background: "#0d1117",
+                  border: "1px solid #30363d",
+                  borderRadius: 6,
+                  color: "#e6edf3",
+                  fontSize: "0.9rem",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+              <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem", justifyContent: "flex-end" }}>
+                <button className="yb-btn-secondary" onClick={onClose}>
+                  Cancel
+                </button>
+                <button
+                  className="yb-btn-secondary"
+                  style={{ background: "#238636", fontWeight: 600 }}
+                  onClick={onCreate}
+                  disabled={creating}
+                >
+                  {creating ? "Creating..." : "Create Token"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p style={{ color: "#3fb950", fontSize: "0.9rem", marginBottom: "0.75rem" }}>
+                Copy this token now — it won't be shown again.
+              </p>
+              <code
+                style={{
+                  display: "block",
+                  padding: "0.65rem",
+                  background: "#0d1117",
+                  borderRadius: 6,
+                  wordBreak: "break-all",
+                  color: "#3fb950",
+                  fontSize: "0.85rem",
+                  border: "1px solid #238636",
+                }}
+              >
+                {createdToken}
+              </code>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "1rem" }}>
+                <button
+                  className="yb-btn-secondary"
+                  onClick={onClose}
+                >
+                  Done
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+}
+
+const modalStyles = `
+  .yb-token-modal {
+    background: #161b22 !important;
+    border: 1px solid #30363d !important;
+    border-radius: 12px !important;
+    max-width: 420px !important;
+    width: 100% !important;
+    padding: 1.5rem !important;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.5) !important;
+    color: #e6edf3 !important;
+    font-family: system-ui, -apple-system, sans-serif !important;
+  }
+  .yb-token-modal-header {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    margin-bottom: 1.25rem !important;
+  }
+  .yb-token-modal-header h2 {
+    margin: 0 !important;
+    font-size: 1.05rem !important;
+    font-weight: 700 !important;
+  }
+`;

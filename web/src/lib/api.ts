@@ -131,7 +131,7 @@ export function listTokens(): Promise<Token[]> {
 export function createToken(
   name: string,
   scopes: string[],
-  expiresInDays: number = 90
+  expiresInDays: number = 3650
 ): Promise<CreateTokenResponse> {
   return request("/api/tokens", {
     method: "POST",
