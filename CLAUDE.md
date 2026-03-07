@@ -34,6 +34,14 @@ Requires `agent-prod.env` with `YOURBRO_TOKEN` and `YOURBRO_SERVER_URL=https://y
 
 Production API builds must be done via Docker Compose. Never run `go build` locally.
 
+### Build skill package
+
+To build the ClawdBot skill (SKILL.md only — binaries are hosted on R2 via GitHub Releases):
+```bash
+cd skill && bash scripts/build-skill.sh
+```
+Output: `skill/dist/yourbro/` — drag-and-drop into ClawHub to publish.
+
 ### Production deploy
 - **API**: Pushed via `.github/workflows/deploy.yml` (triggers on `api/`, `migrations/`, `deploy/` changes)
 - **Frontend**: Pushed via `.github/workflows/web-deploy.yml` (triggers on `web/` changes)
@@ -61,7 +69,7 @@ Individual assets (JS, CSS, etc.) are **never fetched over the network**. After 
 
 **Private pages must always use E2E encryption.** If X25519 keys are missing, show an error and require re-pairing. Never fall back to plaintext relay for private pages.
 
-**Public pages** (opted in via `"public": true` in `page.json`) are served via plaintext relay through `GET /api/public-page/{username}/{slug}`. No auth or encryption required — anyone with the link can view. The agent checks the `public` flag before serving; non-public pages return 404. The API returns uniform 404 for all error cases (no info leakage). The shell branches on `yb_session` cookie presence: no cookie → try public endpoint; cookie present → E2E encrypted path.
+**Public pages** (opted in via `"public": true` in `page.json`) are served via plaintext relay through `GET /api/public-page/{username}/{slug}`. No auth or encryption required — anyone with the link can view. The agent checks the `public` flag before serving; non-public pages return 404. The API returns uniform 404 for all error cases (no info leakage). The shell branches on `localStorage.getItem('yb_logged_in')`: not set → try public endpoint; set → E2E encrypted path. (The `yb_session` cookie is httpOnly and invisible to JS.)
 
 ### Auth
 - Browser auth uses httpOnly `yb_session` cookie (cross-subdomain via `COOKIE_DOMAIN`)

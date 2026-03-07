@@ -57,7 +57,7 @@
             }
 
             // Shared rendering: cache files in SW and create iframe
-            async function renderPage(pageData, isPublic) {
+            async function renderPage(pageData) {
                 var pageTitle = pageData.title || slug;
                 document.title = pageTitle + ' \u2014 yourbro';
 
@@ -94,36 +94,24 @@
                 return iframe;
             }
 
-            // Branch on auth state — check cookie presence (no network request)
-            var hasSession = document.cookie.split(';').some(function(c) {
-                return c.trim().startsWith('yb_session=');
-            });
-
+            // ==========================================
+            // 1. Always try public endpoint first (fast, one GET)
+            // ==========================================
             var pageData = null;
             var isPublic = false;
 
-            if (!hasSession) {
-                // ==========================================
-                // PUBLIC PATH — unauthenticated visitor
-                // ==========================================
-                try {
-                    var publicResp = await fetch(API + '/api/public-page/' +
-                        encodeURIComponent(username) + '/' + encodeURIComponent(slug));
-                    if (publicResp.ok) {
-                        pageData = await publicResp.json();
-                        isPublic = true;
-                    }
-                } catch(e) { /* network error */ }
-
-                if (!pageData || !pageData.files || !pageData.files['index.html']) {
-                    document.body.innerHTML = '<div class="status-msg">' +
-                        'This page is not available.' +
-                        '<div class="subtitle">It may be private or the author\'s agent may be offline.</div>' +
-                        '<a href="/">Sign in</a></div>';
-                    return;
+            try {
+                var publicResp = await fetch(API + '/api/public-page/' +
+                    encodeURIComponent(username) + '/' + encodeURIComponent(slug));
+                if (publicResp.ok) {
+                    pageData = await publicResp.json();
+                    isPublic = true;
                 }
+            } catch(e) { /* network error */ }
 
-                var iframe = await renderPage(pageData, true);
+            // If public worked, render and exit
+            if (isPublic && pageData && pageData.files && pageData.files['index.html']) {
+                var iframe = await renderPage(pageData);
 
                 // Storage bridge: respond with error for public pages (no E2E keys)
                 window.addEventListener('message', function(event) {
@@ -142,17 +130,25 @@
             }
 
             // ==========================================
-            // PRIVATE PATH — authenticated user (E2E encrypted)
+            // 2. Not public — try E2E encrypted path (requires login)
             // ==========================================
+            var hasSession = localStorage.getItem('yb_logged_in') === '1';
+            if (!hasSession) {
+                document.body.innerHTML = '<div class="status-msg">' +
+                    'This page is not available.' +
+                    '<div class="subtitle">It may be private or the author\'s agent may be offline.</div>' +
+                    '<a href="/">Sign in</a></div>';
+                return;
+            }
 
-            // 1. Verify auth
+            // 2a. Verify auth
             var authResp = await fetch(API + '/api/content-token', { credentials: 'include' });
             if (!authResp.ok) {
                 document.body.innerHTML = '<div class="status-msg">Sign in to view this page. <a href="/">Go to login</a></div>';
                 return;
             }
 
-            // 2. Get agent IDs from API
+            // 2b. Get agent IDs from API
             var agentsResp = await fetch(API + '/api/page-agents/' + encodeURIComponent(username), { credentials: 'include' });
             if (!agentsResp.ok) {
                 document.body.innerHTML = '<div class="status-msg">User not found. <a href="/">Go home</a></div>';
@@ -164,7 +160,7 @@
                 return;
             }
 
-            // 3. Load E2E keys from IndexedDB (stored by dashboard pairing flow)
+            // 2c. Load E2E keys from IndexedDB (stored by dashboard pairing flow)
             var x25519Private = null; // CryptoKey
             var x25519PubBytes = null; // Uint8Array
             var agentX25519Keys = {};
@@ -203,7 +199,7 @@
                 }
             } catch(e) { /* IndexedDB not available */ }
 
-            // 4. Derive E2E encryption key
+            // 2d. Derive E2E encryption key
             var e2eAgentId = null;
             var aesKey = null;
             if (x25519Private) {
@@ -275,7 +271,7 @@
                 return bytes;
             }
 
-            // 5. Fetch page bundle from agent via E2E encrypted relay
+            // 2e. Fetch page bundle from agent via E2E encrypted relay
             var usedAgentId = e2eAgentId;
             try {
                 var innerReq = JSON.stringify({
@@ -318,9 +314,9 @@
                 return;
             }
 
-            var iframe = await renderPage(pageData, false);
+            var iframe = await renderPage(pageData);
 
-            // 6. Storage bridge — relay iframe postMessage to agent via E2E
+            // 2f. Storage bridge — relay iframe postMessage to agent via E2E
             window.addEventListener('message', async function(event) {
                 if (!event.data || event.data.type !== 'yourbro-storage') return;
                 if (event.source !== iframe.contentWindow) return;
