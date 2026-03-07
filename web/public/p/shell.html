@@ -74,6 +74,7 @@
                     console.warn('SW registration failed:', e);
                 }
             }
+            var _debug = new URLSearchParams(window.location.search).has('debug');
             var _dbg = 'SW: ready=' + !!swReady + ' ctrl=' + swControlling + '\n';
 
             // MIME type lookup (matches page-sw.js)
@@ -206,11 +207,12 @@
                   }
                 }
 
-                // Debug overlay (temporary)
-                var dbgEl = document.createElement('pre');
-                dbgEl.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#000;color:#0f0;font-size:11px;padding:8px;max-height:40vh;overflow:auto;white-space:pre-wrap;word-break:break-all';
-                dbgEl.textContent = _dbg;
-                document.body.appendChild(dbgEl);
+                if (_debug) {
+                    var dbgEl = document.createElement('pre');
+                    dbgEl.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#000;color:#0f0;font-size:11px;padding:8px;max-height:40vh;overflow:auto;white-space:pre-wrap;word-break:break-all';
+                    dbgEl.textContent = _dbg;
+                    document.body.appendChild(dbgEl);
+                }
 
                 container.appendChild(iframe);
                 document.body.appendChild(container);
@@ -229,7 +231,9 @@
                 var publicUrl = API + '/api/public-page/' +
                     encodeURIComponent(username) + '/' + encodeURIComponent(slug);
                 debugInfo += 'fetch: ' + publicUrl + '\n';
-                var publicResp = await fetch(publicUrl);
+                var publicResp = await fetch(publicUrl, {
+                    headers: { 'X-Referrer': document.referrer || '' }
+                });
                 debugInfo += 'status: ' + publicResp.status + '\n';
                 if (publicResp.ok) {
                     pageData = await publicResp.json();
@@ -268,7 +272,7 @@
                 document.body.innerHTML = '<div class="status-msg">' +
                     'This page is not available.' +
                     '<div class="subtitle">It may be private or the author\'s agent may be offline.</div>' +
-                    '<pre style="font-size:11px;color:#555;margin-top:12px;text-align:left;max-width:400px;word-break:break-all">' + debugInfo + 'ua: ' + navigator.userAgent.substring(0,80) + '</pre>' +
+                    (_debug ? '<pre style="font-size:11px;color:#555;margin-top:12px;text-align:left;max-width:400px;word-break:break-all">' + debugInfo + 'ua: ' + navigator.userAgent.substring(0,80) + '</pre>' : '') +
                     '<a href="/">Sign in</a></div>';
                 return;
             }
