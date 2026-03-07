@@ -124,7 +124,20 @@ function CreateTokenModal({
         <div className="yb-token-modal">
           <div className="yb-token-modal-header">
             <h2>{createdToken ? "Token Created" : "Create API Token"}</h2>
-            <button className="yb-modal-close" onClick={onClose}>
+            <button
+              onClick={onClose}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#656d76",
+                fontSize: "1.5rem",
+                cursor: "pointer",
+                padding: "0.2rem 0.5rem",
+                lineHeight: 1,
+              }}
+              onMouseOver={(e) => (e.currentTarget.style.color = "#e6edf3")}
+              onMouseOut={(e) => (e.currentTarget.style.color = "#656d76")}
+            >
               &times;
             </button>
           </div>
