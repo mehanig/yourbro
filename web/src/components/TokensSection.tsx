@@ -49,6 +49,10 @@ export function TokensSection({
             >
               {t.scopes.join(", ")}
             </span>
+            <div style={{ color: "#656d76", fontSize: "0.75rem", marginTop: "0.2rem" }}>
+              Created {new Date(t.created_at).toLocaleDateString()}
+              {t.expires_at && <> · Expires {new Date(t.expires_at).toLocaleDateString()}</>}
+            </div>
           </div>
           <button
             className="yb-btn-danger"
