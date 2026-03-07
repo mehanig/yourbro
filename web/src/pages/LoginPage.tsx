@@ -1,6 +1,9 @@
-import { API_BASE } from "../lib/api";
+import { Navigate } from "react-router-dom";
+import { API_BASE, isLoggedIn } from "../lib/api";
 
 export function LoginPage() {
+  if (isLoggedIn()) return <Navigate to="/dashboard" replace />;
+
   const apiBase = API_BASE;
 
   return (
