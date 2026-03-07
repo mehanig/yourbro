@@ -75,10 +75,28 @@
                 }
             }
 
+            // MIME type lookup (matches page-sw.js)
+            var MIMES = {
+                'html':'text/html;charset=utf-8','js':'application/javascript;charset=utf-8',
+                'mjs':'application/javascript;charset=utf-8','css':'text/css;charset=utf-8',
+                'json':'application/json;charset=utf-8','svg':'image/svg+xml',
+                'png':'image/png','jpg':'image/jpeg','jpeg':'image/jpeg','gif':'image/gif',
+                'webp':'image/webp','ico':'image/x-icon','woff':'font/woff','woff2':'font/woff2',
+                'ttf':'font/ttf','otf':'font/otf','mp3':'audio/mpeg','mp4':'video/mp4',
+                'webm':'video/webm','pdf':'application/pdf','txt':'text/plain;charset=utf-8',
+                'xml':'text/xml;charset=utf-8'
+            };
+            function fileMime(name) {
+                var d = name.lastIndexOf('.');
+                return d === -1 ? 'application/octet-stream' : (MIMES[name.substring(d+1).toLowerCase()] || 'application/octet-stream');
+            }
+
             // Shared rendering: cache files in SW and create iframe
             async function renderPage(pageData) {
                 var pageTitle = pageData.title || slug;
                 document.title = pageTitle + ' \u2014 yourbro';
+
+                var swCached = false;
 
                 // Send file bundle to Service Worker for caching
                 if (swReady && swControlling) {
@@ -95,18 +113,81 @@
                                     files: pageData.files
                                 }, [channel.port2]);
                             });
+                            swCached = true;
                         }
                     } catch(e) {
                         console.warn('SW caching failed:', e);
                     }
                 }
 
-                // Create sandboxed iframe — SW serves index.html
                 var container = document.createElement('div');
                 container.className = 'frame-container';
                 var iframe = document.createElement('iframe');
-                iframe.src = '/p/assets/' + slug + '/index.html';
-                iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+
+                if (swCached) {
+                    // SW path — serves files from cache
+                    iframe.src = '/p/assets/' + slug + '/index.html';
+                    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+                } else {
+                    // No-SW fallback: blob URLs + fetch/XHR override
+                    var files = pageData.files;
+                    var blobMap = {};
+
+                    // Pass 1: create blob URLs for binary files
+                    for (var name in files) {
+                        if (name === 'index.html') continue;
+                        var content = files[name];
+                        if (typeof content === 'string' && content.substring(0, 7) === 'base64:') {
+                            var bin = atob(content.substring(7));
+                            var bytes = new Uint8Array(bin.length);
+                            for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                            blobMap[name] = URL.createObjectURL(new Blob([bytes], { type: fileMime(name) }));
+                        }
+                    }
+
+                    // Pass 2: text files — rewrite refs to binary assets, then create blobs
+                    for (var name in files) {
+                        if (name === 'index.html') continue;
+                        var content = files[name];
+                        if (typeof content !== 'string' || content.substring(0, 7) === 'base64:') continue;
+                        var text = content;
+                        for (var ref in blobMap) {
+                            text = text.split('./' + ref).join(blobMap[ref]);
+                            text = text.split(ref).join(blobMap[ref]);
+                        }
+                        blobMap[name] = URL.createObjectURL(new Blob([text], { type: fileMime(name) }));
+                    }
+
+                    // Rewrite index.html — replace file refs with blob URLs
+                    var html = files['index.html'];
+                    for (var name in blobMap) {
+                        html = html.split('./' + name).join(blobMap[name]);
+                        html = html.split(name).join(blobMap[name]);
+                    }
+
+                    // Inject fetch/XHR override for dynamic requests from page JS
+                    var mapJson = JSON.stringify(blobMap);
+                    var override = '<script>(function(){var m=' + mapJson + ';' +
+                        'var F=window.fetch;window.fetch=function(u,o){' +
+                        'var k=typeof u==="string"?u:u.url;k=k.replace(/^\\.\\//,"");' +
+                        'if(m[k])return F(m[k],o);return F.apply(this,arguments)};' +
+                        'var X=XMLHttpRequest.prototype.open;' +
+                        'XMLHttpRequest.prototype.open=function(){' +
+                        'var u=arguments[1];if(typeof u==="string"){var k=u.replace(/^\\.\\//,"");if(m[k])arguments[1]=m[k]}' +
+                        'return X.apply(this,arguments)}' +
+                        '})()<\/script>';
+
+                    var headIdx = html.toLowerCase().indexOf('<head>');
+                    if (headIdx !== -1) {
+                        html = html.substring(0, headIdx + 6) + override + html.substring(headIdx + 6);
+                    } else {
+                        html = override + html;
+                    }
+
+                    iframe.src = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+                    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+                }
+
                 container.appendChild(iframe);
                 document.body.appendChild(container);
 
