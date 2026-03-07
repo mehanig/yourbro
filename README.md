@@ -117,7 +117,7 @@ For the local Docker setup, the agent container reads from `agent/.env`:
 ```bash
 YOURBRO_TOKEN=yb_your_token_here
 YOURBRO_SERVER_URL=http://nginx
-SQLITE_PATH=/data/agent.db
+YOURBRO_SQLITE_PATH=/data/agent.db
 ```
 
 The agent connects to the server via WebSocket automatically. No ports to open, no domain needed.

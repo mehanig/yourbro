@@ -24,7 +24,17 @@ import (
 )
 
 func main() {
-	sqlitePath := getEnv("SQLITE_PATH", "/data/agent.db")
+	sqlitePath := getEnv("YOURBRO_SQLITE_PATH", "")
+	if sqlitePath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
+		sqlitePath = home + "/.yourbro/agent.db"
+	}
+	if err := os.MkdirAll(sqlitePath[:strings.LastIndex(sqlitePath, "/")], 0755); err != nil {
+		log.Printf("Warning: could not create directory for %s: %v", sqlitePath, err)
+	}
 
 	db, err := storage.NewDB(sqlitePath)
 	if err != nil {

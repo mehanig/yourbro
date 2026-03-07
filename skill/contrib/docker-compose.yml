@@ -8,7 +8,7 @@ services:
     volumes:
       - agent-data:/data
     environment:
-      SQLITE_PATH: /data/agent.db
+      YOURBRO_SQLITE_PATH: /data/agent.db
       YOURBRO_TOKEN: ${YOURBRO_TOKEN:-}
       YOURBRO_SERVER_URL: ${YOURBRO_SERVER_URL:-}
       YOURBRO_AGENT_NAME: ${YOURBRO_AGENT_NAME:-relay-agent}

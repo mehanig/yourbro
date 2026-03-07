@@ -143,7 +143,7 @@ The agent binary is a single static executable. No runtime dependencies. OpenCla
 |---|---|---|---|
 | `YOURBRO_TOKEN` | Yes | -- | API token from yourbro.ai dashboard (used by both ClawdBot and the agent) |
 | `YOURBRO_SERVER_URL` | Yes | -- | yourbro API server URL (e.g., `https://api.yourbro.ai`) |
-| `SQLITE_PATH` | No | `~/.yourbro/agent.db` | SQLite database path |
+| `YOURBRO_SQLITE_PATH` | No | `~/.yourbro/agent.db` | SQLite database path |
 
 Two env vars (`YOURBRO_TOKEN` + `YOURBRO_SERVER_URL`) are all you need.
 

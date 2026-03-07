@@ -11,7 +11,7 @@ Restart=on-failure
 RestartSec=5
 
 # Environment - edit these or use an EnvironmentFile
-Environment=SQLITE_PATH=%h/.yourbro/agent.db
+Environment=YOURBRO_SQLITE_PATH=%h/.yourbro/agent.db
 # Environment=YOURBRO_TOKEN=yb_your_token
 # Environment=YOURBRO_SERVER_URL=https://yourbro.ai
 

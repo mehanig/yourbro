@@ -6,7 +6,7 @@ services:
     volumes:
       - agent-prod-data:/data
     environment:
-      SQLITE_PATH: /data/agent.db
+      YOURBRO_SQLITE_PATH: /data/agent.db
     env_file:
       - ./agent-prod.env
     restart: unless-stopped
