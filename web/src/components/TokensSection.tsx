@@ -16,12 +16,22 @@ export function TokensSection({
   const [newToken, setNewToken] = useState<string | null>(
     newlyCreated?.token ?? null
   );
+  const [showForm, setShowForm] = useState(false);
+  const [tokenName, setTokenName] = useState("clawdbot");
+  const [creating, setCreating] = useState(false);
 
   const handleCreate = async () => {
-    const name = prompt("Token name:", "clawdbot") || "clawdbot";
-    const resp = await onCreate(name, ["manage:keys"]);
-    setNewToken(resp.token);
-    setShowNew(true);
+    const name = tokenName.trim() || "clawdbot";
+    setCreating(true);
+    try {
+      const resp = await onCreate(name, ["manage:keys"]);
+      setNewToken(resp.token);
+      setShowNew(true);
+      setShowForm(false);
+      setTokenName("clawdbot");
+    } finally {
+      setCreating(false);
+    }
   };
 
   return (
@@ -50,13 +60,52 @@ export function TokensSection({
           </button>
         </div>
       ))}
-      <button
-        className="yb-btn-secondary"
-        style={{ marginTop: "0.75rem" }}
-        onClick={handleCreate}
-      >
-        + New Token
-      </button>
+      {!showForm ? (
+        <button
+          className="yb-btn-secondary"
+          style={{ marginTop: "0.75rem" }}
+          onClick={() => setShowForm(true)}
+        >
+          + New Token
+        </button>
+      ) : (
+        <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem", alignItems: "center" }}>
+          <input
+            type="text"
+            value={tokenName}
+            onChange={(e) => setTokenName(e.target.value)}
+            placeholder="Token name"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !creating) handleCreate();
+              if (e.key === "Escape") { setShowForm(false); setTokenName("clawdbot"); }
+            }}
+            style={{
+              padding: "0.4rem 0.7rem",
+              background: "#0d1117",
+              border: "1px solid #30363d",
+              borderRadius: 6,
+              color: "#e6edf3",
+              fontSize: "0.85rem",
+              flex: 1,
+              outline: "none",
+            }}
+          />
+          <button
+            className="yb-btn-secondary"
+            onClick={handleCreate}
+            disabled={creating}
+          >
+            {creating ? "Creating..." : "Create"}
+          </button>
+          <button
+            className="yb-btn-secondary"
+            onClick={() => { setShowForm(false); setTokenName("clawdbot"); }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       {showNew && newToken && (
         <div
           style={{
