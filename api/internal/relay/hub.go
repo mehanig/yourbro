@@ -18,7 +18,7 @@ import (
 // Hub manages WebSocket connections from relay-mode agents.
 type Hub struct {
 	mu     sync.RWMutex
-	agents map[int64]*AgentConn // agentID → connection
+	agents map[string]*AgentConn // agentUUID → connection
 
 	DB     *storage.DB
 	Notify func(userID int64) // called when agent status changes (SSE broker)
@@ -26,9 +26,9 @@ type Hub struct {
 
 // AgentConn represents a connected relay-mode agent.
 type AgentConn struct {
-	ws      *websocket.Conn
-	userID  int64
-	agentID int64
+	ws        *websocket.Conn
+	userID    int64
+	agentUUID string
 
 	mu      sync.Mutex
 	pending map[string]chan models.RelayResponse // requestID → response channel
@@ -36,32 +36,53 @@ type AgentConn struct {
 
 func NewHub(db *storage.DB, notify func(userID int64)) *Hub {
 	return &Hub{
-		agents: make(map[int64]*AgentConn),
+		agents: make(map[string]*AgentConn),
 		DB:     db,
 		Notify: notify,
 	}
 }
 
 // IsOnline checks if an agent is connected via WebSocket.
-func (h *Hub) IsOnline(agentID int64) bool {
+func (h *Hub) IsOnline(agentUUID string) bool {
 	h.mu.RLock()
-	_, ok := h.agents[agentID]
+	_, ok := h.agents[agentUUID]
 	h.mu.RUnlock()
 	return ok
 }
 
 // HandleAgentWS upgrades an HTTP connection to a WebSocket for an agent.
 // Called from the route handler after authentication.
-func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request, userID int64, agentName string) {
-	// Find or create agent record
-	agent, err := h.DB.GetAgentByUserAndName(r.Context(), userID, agentName)
+func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request, userID int64, agentName, agentUUID string) {
+	if agentUUID == "" {
+		http.Error(w, "uuid query parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	// Look up by UUID first; if not found, try (userID, name) for backward compat
+	agent, err := h.DB.GetAgentByUUID(r.Context(), agentUUID)
 	if err != nil {
-		// Create a new relay-mode agent
-		agent, err = h.DB.CreateAgent(r.Context(), userID, agentName)
+		// Try by name (backward compat: old agent reconnecting)
+		agent, err = h.DB.GetAgentByUserAndName(r.Context(), userID, agentName)
 		if err != nil {
-			http.Error(w, "failed to register agent", http.StatusInternalServerError)
-			return
+			// Brand new agent — create with UUID
+			agent, err = h.DB.CreateAgent(r.Context(), userID, agentName, agentUUID)
+			if err != nil {
+				http.Error(w, "failed to register agent", http.StatusInternalServerError)
+				return
+			}
+		} else if agent.ID != agentUUID {
+			// Existing agent matched by name but has a different/empty UUID — update it
+			h.DB.UpdateAgentUUID(r.Context(), agent.DBId, agentUUID)
+			agent.ID = agentUUID
 		}
+	} else if agent.UserID != userID {
+		// UUID exists but belongs to a different user — reject
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	} else if agent.Name != agentName {
+		// UUID matched, same owner, name changed — update name
+		h.DB.UpdateAgentName(r.Context(), agentUUID, agentName)
+		agent.Name = agentName
 	}
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
@@ -74,10 +95,10 @@ func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request, userID int64
 	conn.SetReadLimit(2 * 1024 * 1024) // 2MB
 
 	ac := &AgentConn{
-		ws:      conn,
-		userID:  userID,
-		agentID: agent.ID,
-		pending: make(map[string]chan models.RelayResponse),
+		ws:        conn,
+		userID:    userID,
+		agentUUID: agent.ID,
+		pending:   make(map[string]chan models.RelayResponse),
 	}
 
 	// Register connection
@@ -90,7 +111,7 @@ func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request, userID int64
 		h.Notify(userID)
 	}
 
-	log.Printf("Agent %d (%s) connected via WebSocket", agent.ID, agentName)
+	log.Printf("Agent %s (%s) connected via WebSocket", agent.ID, agentName)
 
 	// Read loop — receives responses from agent
 	h.readLoop(ac)
@@ -117,7 +138,7 @@ func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request, userID int64
 	if h.Notify != nil {
 		h.Notify(userID)
 	}
-	log.Printf("Agent %d (%s) disconnected", agent.ID, agentName)
+	log.Printf("Agent %s (%s) disconnected", agent.ID, agentName)
 }
 
 // readLoop reads WebSocket messages from the agent (responses to relay requests).
@@ -139,7 +160,7 @@ func (h *Hub) readLoop(ac *AgentConn) {
 
 		var resp models.RelayResponse
 		if err := json.Unmarshal(msg.Payload, &resp); err != nil {
-			log.Printf("Agent %d: bad response payload: %v", ac.agentID, err)
+			log.Printf("Agent %s: bad response payload: %v", ac.agentUUID, err)
 			continue
 		}
 		resp.ID = msg.ID
@@ -158,9 +179,9 @@ func (h *Hub) readLoop(ac *AgentConn) {
 }
 
 // SendRequest sends a relay request to an agent and waits for the response.
-func (h *Hub) SendRequest(ctx context.Context, agentID int64, req models.RelayRequest) (models.RelayResponse, error) {
+func (h *Hub) SendRequest(ctx context.Context, agentUUID string, req models.RelayRequest) (models.RelayResponse, error) {
 	h.mu.RLock()
-	ac, ok := h.agents[agentID]
+	ac, ok := h.agents[agentUUID]
 	h.mu.RUnlock()
 	if !ok {
 		return models.RelayResponse{}, errors.New("agent not connected")

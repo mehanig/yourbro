@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,8 +18,8 @@ type RelayHandler struct {
 
 // Relay handles POST /api/relay/{agent_id} — forwards a request to an agent via WebSocket.
 func (h *RelayHandler) Relay(w http.ResponseWriter, r *http.Request) {
-	agentID, err := strconv.ParseInt(chi.URLParam(r, "agent_id"), 10, 64)
-	if err != nil {
+	agentUUID := chi.URLParam(r, "agent_id") // UUID string
+	if agentUUID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent_id"})
 		return
 	}
@@ -28,14 +27,14 @@ func (h *RelayHandler) Relay(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserID(r)
 
 	// Verify the user owns this agent
-	agent, err := h.Hub.DB.GetAgentByID(r.Context(), agentID)
+	agent, err := h.Hub.DB.GetAgentByUUID(r.Context(), agentUUID)
 	if err != nil || agent.UserID != userID {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent not found"})
 		return
 	}
 
 	// Check agent is connected
-	if !h.Hub.IsOnline(agentID) {
+	if !h.Hub.IsOnline(agentUUID) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "agent offline"})
 		return
 	}
@@ -61,7 +60,7 @@ func (h *RelayHandler) Relay(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	resp, err := h.Hub.SendRequest(ctx, agentID, req)
+	resp, err := h.Hub.SendRequest(ctx, agentUUID, req)
 	if err != nil {
 		writeJSON(w, http.StatusGatewayTimeout, map[string]string{"error": "relay timeout or agent error"})
 		return

@@ -184,13 +184,13 @@ func (db *DB) GetUserByPublicKey(ctx context.Context, publicKey string) (*models
 
 // Agents
 
-func (db *DB) CreateAgent(ctx context.Context, userID int64, name string) (*models.Agent, error) {
+func (db *DB) CreateAgent(ctx context.Context, userID int64, name, agentUUID string) (*models.Agent, error) {
 	var a models.Agent
 	err := db.Pool.QueryRow(ctx, `
-		INSERT INTO agents (user_id, name)
-		VALUES ($1, $2)
-		RETURNING id, user_id, name, paired_at
-	`, userID, name).Scan(&a.ID, &a.UserID, &a.Name, &a.PairedAt)
+		INSERT INTO agents (user_id, name, uuid)
+		VALUES ($1, $2, $3)
+		RETURNING uuid, id, user_id, name, paired_at
+	`, userID, name, agentUUID).Scan(&a.ID, &a.DBId, &a.UserID, &a.Name, &a.PairedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +199,7 @@ func (db *DB) CreateAgent(ctx context.Context, userID int64, name string) (*mode
 
 func (db *DB) ListAgents(ctx context.Context, userID int64) ([]models.Agent, error) {
 	rows, err := db.Pool.Query(ctx, `
-		SELECT id, user_id, name, paired_at
+		SELECT uuid, id, user_id, name, paired_at
 		FROM agents WHERE user_id = $1 ORDER BY paired_at DESC
 	`, userID)
 	if err != nil {
@@ -210,7 +210,7 @@ func (db *DB) ListAgents(ctx context.Context, userID int64) ([]models.Agent, err
 	var agents []models.Agent
 	for rows.Next() {
 		var a models.Agent
-		if err := rows.Scan(&a.ID, &a.UserID, &a.Name, &a.PairedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.DBId, &a.UserID, &a.Name, &a.PairedAt); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)
@@ -218,17 +218,17 @@ func (db *DB) ListAgents(ctx context.Context, userID int64) ([]models.Agent, err
 	return agents, nil
 }
 
-func (db *DB) DeleteAgent(ctx context.Context, id, userID int64) error {
-	_, err := db.Pool.Exec(ctx, `DELETE FROM agents WHERE id = $1 AND user_id = $2`, id, userID)
+func (db *DB) DeleteAgent(ctx context.Context, uuid string, userID int64) error {
+	_, err := db.Pool.Exec(ctx, `DELETE FROM agents WHERE uuid = $1 AND user_id = $2`, uuid, userID)
 	return err
 }
 
-func (db *DB) GetAgentByID(ctx context.Context, id int64) (*models.Agent, error) {
+func (db *DB) GetAgentByUUID(ctx context.Context, uuid string) (*models.Agent, error) {
 	var a models.Agent
 	err := db.Pool.QueryRow(ctx, `
-		SELECT id, user_id, name, paired_at
-		FROM agents WHERE id = $1
-	`, id).Scan(&a.ID, &a.UserID, &a.Name, &a.PairedAt)
+		SELECT uuid, id, user_id, name, paired_at
+		FROM agents WHERE uuid = $1
+	`, uuid).Scan(&a.ID, &a.DBId, &a.UserID, &a.Name, &a.PairedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -239,13 +239,25 @@ func (db *DB) GetAgentByID(ctx context.Context, id int64) (*models.Agent, error)
 func (db *DB) GetAgentByUserAndName(ctx context.Context, userID int64, name string) (*models.Agent, error) {
 	var a models.Agent
 	err := db.Pool.QueryRow(ctx, `
-		SELECT id, user_id, name, paired_at
+		SELECT uuid, id, user_id, name, paired_at
 		FROM agents WHERE user_id = $1 AND name = $2
-	`, userID, name).Scan(&a.ID, &a.UserID, &a.Name, &a.PairedAt)
+	`, userID, name).Scan(&a.ID, &a.DBId, &a.UserID, &a.Name, &a.PairedAt)
 	if err != nil {
 		return nil, err
 	}
 	return &a, nil
+}
+
+// UpdateAgentUUID sets the UUID for an existing agent (by internal DB id).
+func (db *DB) UpdateAgentUUID(ctx context.Context, dbID int64, uuid string) error {
+	_, err := db.Pool.Exec(ctx, `UPDATE agents SET uuid = $1 WHERE id = $2`, uuid, dbID)
+	return err
+}
+
+// UpdateAgentName updates the name for an agent identified by UUID.
+func (db *DB) UpdateAgentName(ctx context.Context, uuid, name string) error {
+	_, err := db.Pool.Exec(ctx, `UPDATE agents SET name = $1 WHERE uuid = $2`, name, uuid)
+	return err
 }
 
 // Page Views (analytics)

@@ -99,12 +99,15 @@ func main() {
 	serverURL = strings.TrimRight(serverURL, "/")
 	log.Printf("Connecting to %s via WebSocket", serverURL)
 
-	// Initialize E2E encryption if agent has an identity
+	// Initialize E2E encryption and agent identity
 	var cipherCache *e2e.CipherCache
+	var agentUUID string
 	if identity, err := db.GetOrCreateIdentity(); err != nil {
 		log.Printf("WARNING: E2E encryption disabled: %v", err)
 	} else {
 		cipherCache = e2e.NewCipherCache(identity.X25519PrivateKey)
+		agentUUID = identity.UUID
+		log.Printf("Agent UUID: %s", agentUUID)
 		log.Printf("E2E encryption enabled (X25519 pub: %x...)", identity.X25519PublicKey.Bytes()[:8])
 	}
 
@@ -125,6 +128,7 @@ func main() {
 		ServerURL: serverURL,
 		APIToken:  apiToken,
 		AgentName: agentName,
+		AgentUUID: agentUUID,
 		Handler:   router.HandleRequest,
 	}
 

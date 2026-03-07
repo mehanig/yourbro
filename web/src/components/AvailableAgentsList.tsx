@@ -7,8 +7,8 @@ export function AvailableAgentsList({
   onPair,
 }: {
   agents: Agent[];
-  getStatus: (id: number) => string | undefined;
-  onPair: (agentId: number, code: string) => Promise<{ ok: boolean; error?: string }>;
+  getStatus: (id: string) => string | undefined;
+  onPair: (agentId: string, code: string) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const available = agents.filter(
     (a) => a.is_online && getStatus(a.id) === "unpaired"
@@ -32,7 +32,7 @@ function PairForm({
   onPair,
 }: {
   agent: Agent;
-  onPair: (agentId: number, code: string) => Promise<{ ok: boolean; error?: string }>;
+  onPair: (agentId: string, code: string) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const [code, setCode] = useState("");
   const [status, setStatus] = useState<{

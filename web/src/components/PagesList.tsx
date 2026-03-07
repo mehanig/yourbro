@@ -19,7 +19,7 @@ export function PagesList({
   hasAgent: boolean;
   anyOnline: boolean;
   onAnalytics: (slug: string) => void;
-  onDelete: (slug: string, agentId: number) => void;
+  onDelete: (slug: string, agentId: string) => void;
 }) {
   if (loading) {
     return (

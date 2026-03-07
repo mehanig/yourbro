@@ -6,8 +6,8 @@ export function PairedAgentsList({
   onRemove,
 }: {
   agents: Agent[];
-  getStatus: (id: number) => string | undefined;
-  onRemove: (id: number) => void;
+  getStatus: (id: string) => string | undefined;
+  onRemove: (id: string) => void;
 }) {
   const paired = agents.filter((a) => {
     const s = getStatus(a.id);

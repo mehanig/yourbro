@@ -60,7 +60,7 @@ export interface Page {
 }
 
 /** Fetch page list from agent via relay. Returns empty array if agent is offline. */
-export async function listPagesViaRelay(agentId: number): Promise<Page[]> {
+export async function listPagesViaRelay(agentId: string): Promise<Page[]> {
   try {
     const res = await fetch(`${API_BASE}/api/relay/${agentId}`, {
       method: "POST",
@@ -145,7 +145,7 @@ export function deleteToken(id: number): Promise<void> {
 
 // Agents
 export interface Agent {
-  id: number;
+  id: string;
   name: string;
   paired_at: string;
   is_online: boolean;
@@ -162,7 +162,7 @@ export function registerAgent(name: string): Promise<Agent> {
   });
 }
 
-export function deleteAgent(id: number): Promise<void> {
+export function deleteAgent(id: string): Promise<void> {
   return request(`/api/agents/${id}`, { method: "DELETE" });
 }
 

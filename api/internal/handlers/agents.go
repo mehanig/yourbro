@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/mehanig/yourbro/api/internal/middleware"
@@ -14,7 +13,7 @@ import (
 type AgentsHandler struct {
 	DB     *storage.DB
 	Broker *SSEBroker
-	Hub    interface{ IsOnline(int64) bool } // relay.Hub
+	Hub    interface{ IsOnline(string) bool } // relay.Hub
 }
 
 func (h *AgentsHandler) Register(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +25,7 @@ func (h *AgentsHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	agent, err := h.DB.CreateAgent(r.Context(), userID, req.Name)
+	agent, err := h.DB.CreateAgent(r.Context(), userID, req.Name, req.UUID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to register agent"})
 		return
@@ -58,8 +57,8 @@ func (h *AgentsHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AgentsHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
+	id := chi.URLParam(r, "id") // UUID string
+	if id == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent id"})
 		return
 	}

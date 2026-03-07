@@ -1,7 +1,7 @@
 ---
 title: "refactor: Replace agent auto-increment IDs with UUIDs"
 type: refactor
-status: active
+status: completed
 date: 2026-03-07
 ---
 
@@ -191,18 +191,18 @@ export function deleteAgent(id: string): Promise<void> { ... }
 
 ## Acceptance Criteria
 
-- [ ] Agent generates UUID v4 on first run, persists in SQLite
-- [ ] Existing agents get backfilled UUID via migration
-- [ ] UUID sent in WebSocket handshake query param
-- [ ] All API responses use UUID string for agent ID
-- [ ] Auto-increment integer never exposed in API responses
-- [ ] `/api/relay/{uuid}` works with UUID path param
-- [ ] `/api/agents/{uuid}` DELETE works
-- [ ] Frontend agent operations work with string IDs
-- [ ] Shell.html page loading works with UUID agent IDs
-- [ ] Agent rename updates name on existing UUID record (not creating duplicate)
-- [ ] IndexedDB agent key storage works with UUID keys
-- [ ] SSE agent stream sends UUID-based agents
+- [x] Agent generates UUID v4 on first run, persists in SQLite
+- [x] Existing agents get backfilled UUID via migration
+- [x] UUID sent in WebSocket handshake query param
+- [x] All API responses use UUID string for agent ID
+- [x] Auto-increment integer never exposed in API responses
+- [x] `/api/relay/{uuid}` works with UUID path param
+- [x] `/api/agents/{uuid}` DELETE works
+- [x] Frontend agent operations work with string IDs
+- [x] Shell.html page loading works with UUID agent IDs
+- [x] Agent rename updates name on existing UUID record (not creating duplicate)
+- [x] IndexedDB agent key storage works with UUID keys
+- [x] SSE agent stream sends UUID-based agents
 
 ## Migration Strategy
 

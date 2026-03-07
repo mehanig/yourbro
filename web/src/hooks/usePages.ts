@@ -19,7 +19,7 @@ export interface AgentPages {
 
 export function usePages(
   agents: Agent[],
-  getStatus: (id: number) => string | undefined
+  getStatus: (id: string) => string | undefined
 ) {
   const [agentPages, setAgentPages] = useState<AgentPages[]>([]);
   const [analytics, setAnalytics] = useState<Map<string, PageAnalytics>>(
@@ -68,9 +68,9 @@ export function usePages(
   }, []);
 
   const deletePage = useCallback(
-    async (slug: string, agentId: number): Promise<{ ok: boolean; error?: string }> => {
+    async (slug: string, agentId: string): Promise<{ ok: boolean; error?: string }> => {
       try {
-        const agentPubBytes = await loadAgentX25519Key(String(agentId));
+        const agentPubBytes = await loadAgentX25519Key(agentId);
         if (!agentPubBytes) {
           return { ok: false, error: "Agent encryption keys missing. Re-pair your agent." };
         }

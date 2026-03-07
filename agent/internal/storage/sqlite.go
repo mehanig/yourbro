@@ -11,13 +11,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// Identity holds the agent's X25519 keypair for E2E encryption.
+// Identity holds the agent's X25519 keypair for E2E encryption and its UUID.
 type Identity struct {
 	X25519PrivateKey *ecdh.PrivateKey
 	X25519PublicKey  *ecdh.PublicKey
+	UUID             string
 }
 
 type DB struct {
@@ -57,7 +60,8 @@ func NewDB(path string) (*DB, error) {
 		CREATE TABLE IF NOT EXISTS agent_identity (
 			id INTEGER PRIMARY KEY CHECK (id = 1),
 			x25519_private_key BLOB NOT NULL,
-			x25519_public_key BLOB NOT NULL
+			x25519_public_key BLOB NOT NULL,
+			uuid TEXT NOT NULL DEFAULT ''
 		);
 	`)
 	if err != nil {
@@ -249,42 +253,53 @@ func (d *DB) List(slug, prefix string) ([]Entry, error) {
 
 // --- Agent Identity (X25519) ---
 
-// GetOrCreateIdentity returns the agent's X25519 keypair, generating one on first call.
+// GetOrCreateIdentity returns the agent's X25519 keypair and UUID, generating them on first call.
 func (d *DB) GetOrCreateIdentity() (*Identity, error) {
 	var privBytes, pubBytes []byte
-	err := d.db.QueryRow(`SELECT x25519_private_key, x25519_public_key FROM agent_identity WHERE id = 1`).
-		Scan(&privBytes, &pubBytes)
+	var agentUUID string
+	err := d.db.QueryRow(`SELECT x25519_private_key, x25519_public_key, uuid FROM agent_identity WHERE id = 1`).
+		Scan(&privBytes, &pubBytes, &agentUUID)
 	if err == nil {
 		priv, err := ecdh.X25519().NewPrivateKey(privBytes)
 		if err != nil {
 			return nil, fmt.Errorf("parse stored X25519 private key: %w", err)
 		}
+		// Backfill UUID for existing agents that don't have one
+		if agentUUID == "" {
+			agentUUID = uuid.New().String()
+			d.db.Exec(`UPDATE agent_identity SET uuid = ? WHERE id = 1`, agentUUID)
+			log.Printf("Generated UUID for existing agent: %s", agentUUID)
+		}
 		return &Identity{
 			X25519PrivateKey: priv,
 			X25519PublicKey:  priv.PublicKey(),
+			UUID:             agentUUID,
 		}, nil
 	}
 	if err != sql.ErrNoRows {
 		return nil, fmt.Errorf("query agent_identity: %w", err)
 	}
 
-	// Generate new X25519 keypair
+	// Generate new X25519 keypair and UUID
 	priv, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("generate X25519 keypair: %w", err)
 	}
+	agentUUID = uuid.New().String()
 
 	_, err = d.db.Exec(
-		`INSERT INTO agent_identity (id, x25519_private_key, x25519_public_key) VALUES (1, ?, ?)`,
-		priv.Bytes(), priv.PublicKey().Bytes(),
+		`INSERT INTO agent_identity (id, x25519_private_key, x25519_public_key, uuid) VALUES (1, ?, ?, ?)`,
+		priv.Bytes(), priv.PublicKey().Bytes(), agentUUID,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("store X25519 keypair: %w", err)
+		return nil, fmt.Errorf("store identity: %w", err)
 	}
 
+	log.Printf("Generated new agent identity: UUID=%s", agentUUID)
 	return &Identity{
 		X25519PrivateKey: priv,
 		X25519PublicKey:  priv.PublicKey(),
+		UUID:             agentUUID,
 	}, nil
 }
 

@@ -29,12 +29,12 @@ func (h *PagesHandler) PageAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ids []int64
+	var ids []string
 	for _, a := range agents {
 		ids = append(ids, a.ID)
 	}
 	if ids == nil {
-		ids = []int64{}
+		ids = []string{}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"agent_ids": ids})

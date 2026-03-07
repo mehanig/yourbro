@@ -48,6 +48,7 @@ type Client struct {
 	ServerURL  string // wss://yourbro.ai or https://yourbro.ai
 	APIToken   string
 	AgentName  string
+	AgentUUID  string
 	Handler    func(ctx context.Context, req Request) Response
 }
 
@@ -96,7 +97,7 @@ func (c *Client) connect(ctx context.Context) error {
 	wsURL = strings.TrimRight(wsURL, "/")
 	wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
 	wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
-	wsURL += "/ws/agent?name=" + c.AgentName
+	wsURL += "/ws/agent?name=" + c.AgentName + "&uuid=" + c.AgentUUID
 
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

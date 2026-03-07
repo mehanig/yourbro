@@ -12,9 +12,9 @@ export function PageCard({
   page: Page;
   username: string;
   stats: PageAnalytics | undefined;
-  agentId: number;
+  agentId: string;
   onAnalytics: (slug: string) => void;
-  onDelete: (slug: string, agentId: number) => void;
+  onDelete: (slug: string, agentId: string) => void;
   duplicateWarning?: string;
 }) {
   let statsText = "";

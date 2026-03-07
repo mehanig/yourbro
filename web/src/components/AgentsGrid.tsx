@@ -9,9 +9,9 @@ export function AgentsGrid({
   onPair,
 }: {
   agents: Agent[];
-  getStatus: (id: number) => string | undefined;
-  onRemove: (id: number) => void;
-  onPair: (agentId: number, code: string) => Promise<{ ok: boolean; error?: string }>;
+  getStatus: (id: string) => string | undefined;
+  onRemove: (id: string) => void;
+  onPair: (agentId: string, code: string) => Promise<{ ok: boolean; error?: string }>;
 }) {
   return (
     <div

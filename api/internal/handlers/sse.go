@@ -17,18 +17,18 @@ import (
 // SSEBroker manages per-user SSE connections and broadcasts agent status updates.
 type SSEBroker struct {
 	DB  *storage.DB
-	Hub interface{ IsOnline(int64) bool } // set after Hub is created
+	Hub interface{ IsOnline(string) bool } // set after Hub is created
 
 	mu        sync.Mutex
 	clients   map[int64]map[chan []byte]struct{} // userID -> set of channels
-	lastState map[int64]map[int64]bool           // userID -> agentID -> was_online
+	lastState map[int64]map[string]bool          // userID -> agentUUID -> was_online
 }
 
 func NewSSEBroker(db *storage.DB) *SSEBroker {
 	return &SSEBroker{
 		DB:        db,
 		clients:   make(map[int64]map[chan []byte]struct{}),
-		lastState: make(map[int64]map[int64]bool),
+		lastState: make(map[int64]map[string]bool),
 	}
 }
 
@@ -94,7 +94,7 @@ func (b *SSEBroker) sendAgents(userID int64) {
 
 	b.mu.Lock()
 	// Update last known state
-	state := make(map[int64]bool, len(agents))
+	state := make(map[string]bool, len(agents))
 	for _, a := range agents {
 		state[a.ID] = a.IsOnline
 	}

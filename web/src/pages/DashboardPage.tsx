@@ -32,7 +32,7 @@ export function DashboardPage() {
   const [analyticsSlug, setAnalyticsSlug] = useState<string | null>(null);
 
   const handlePair = useCallback(
-    async (agentId: number, code: string) => {
+    async (agentId: string, code: string) => {
       if (!user) return { ok: false, error: "Not logged in" };
       return pairAgent(agentId, code, user.username);
     },
@@ -40,7 +40,7 @@ export function DashboardPage() {
   );
 
   const handleDelete = useCallback(
-    async (slug: string, agentId: number) => {
+    async (slug: string, agentId: string) => {
       if (!confirm(`Delete page "${slug}"?`)) return;
       const result = await deletePage(slug, agentId);
       if (!result.ok) alert(`Delete failed: ${result.error}`);

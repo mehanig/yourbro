@@ -32,8 +32,9 @@ type PublicKey struct {
 }
 
 type Agent struct {
-	ID       int64     `json:"id"`
-	UserID   int64     `json:"user_id"`
+	ID       string    `json:"id"`        // UUID string — primary public identifier
+	DBId     int64     `json:"-"`         // internal BIGSERIAL, never exposed via API
+	UserID   int64     `json:"user_id,omitempty"`
 	Name     string    `json:"name"`
 	PairedAt time.Time `json:"paired_at"`
 	IsOnline bool      `json:"is_online"`
@@ -60,6 +61,7 @@ type CreateTokenResponse struct {
 
 type RegisterAgentRequest struct {
 	Name string `json:"name"`
+	UUID string `json:"uuid"`
 }
 
 type RelayRequest struct {

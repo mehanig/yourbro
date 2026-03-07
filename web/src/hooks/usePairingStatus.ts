@@ -11,9 +11,9 @@ import { deriveE2EKey, encryptedRelay, x25519KeyId } from "../lib/e2e";
 
 type PairingStatus = "checking" | "paired" | "unpaired";
 
-async function probeAgentPairing(agentId: number): Promise<boolean> {
+async function probeAgentPairing(agentId: string): Promise<boolean> {
   try {
-    const agentPubBytes = await loadAgentX25519Key(String(agentId));
+    const agentPubBytes = await loadAgentX25519Key(agentId);
     if (!agentPubBytes) return false;
     const x25519kp = await getOrCreateX25519Keypair();
     const aesKey = await deriveE2EKey(x25519kp.privateKey, agentPubBytes);
@@ -29,11 +29,11 @@ async function probeAgentPairing(agentId: number): Promise<boolean> {
 }
 
 export function usePairingStatus(agents: Agent[]) {
-  const [statusMap, setStatusMap] = useState<Map<number, PairingStatus>>(
+  const [statusMap, setStatusMap] = useState<Map<string, PairingStatus>>(
     new Map()
   );
   const [hasKeypair, setHasKeypair] = useState(false);
-  const probedRef = useRef<Set<number>>(new Set());
+  const probedRef = useRef<Set<string>>(new Set());
 
   // Check for keypair on mount
   useEffect(() => {
@@ -72,13 +72,13 @@ export function usePairingStatus(agents: Agent[]) {
   }, [agents, hasKeypair, statusMap]);
 
   const getStatus = useCallback(
-    (id: number): PairingStatus | undefined => statusMap.get(id),
+    (id: string): PairingStatus | undefined => statusMap.get(id),
     [statusMap]
   );
 
   const pairAgent = useCallback(
     async (
-      agentId: number,
+      agentId: string,
       code: string,
       username: string
     ): Promise<{ ok: boolean; error?: string }> => {
@@ -116,7 +116,7 @@ export function usePairingStatus(agents: Agent[]) {
           const agentX25519Bytes = base64RawUrlDecode(
             pairResp.agent_x25519_public_key
           );
-          await storeAgentX25519Key(String(agentId), agentX25519Bytes);
+          await storeAgentX25519Key(agentId, agentX25519Bytes);
         }
 
         setStatusMap((prev) => new Map(prev).set(agentId, "paired"));
@@ -132,9 +132,9 @@ export function usePairingStatus(agents: Agent[]) {
   );
 
   const removeAgent = useCallback(
-    async (agentId: number): Promise<void> => {
+    async (agentId: string): Promise<void> => {
       try {
-        const agentPubBytes = await loadAgentX25519Key(String(agentId));
+        const agentPubBytes = await loadAgentX25519Key(agentId);
         if (agentPubBytes) {
           const x25519kp = await getOrCreateX25519Keypair();
           const aesKey = await deriveE2EKey(

@@ -338,13 +338,14 @@ func main() {
 			return
 		}
 
-		// Get agent name from query param
+		// Get agent name and UUID from query params
 		agentName := r.URL.Query().Get("name")
 		if agentName == "" {
 			agentName = "relay-agent"
 		}
+		agentUUID := r.URL.Query().Get("uuid")
 
-		relayHub.HandleAgentWS(w, r, token.UserID, agentName)
+		relayHub.HandleAgentWS(w, r, token.UserID, agentName, agentUUID)
 	})
 
 	// Authenticated API routes
