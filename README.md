@@ -53,7 +53,23 @@ Browser (yourbro.ai)     Cloudflare R2          api.yourbro.ai         Your Agen
    │── POST /api/relay/ID ────────────────────────>│── WebSocket msg ─────>│
    │<── page HTML ─────────────────────────────────│<── WebSocket resp ────│
    │                                                                        │
-   │── Render in sandboxed iframe with SDK                                  │
+   │── Render in sandboxed iframe                                           │
+   │                                                                        │
+   │   Two rendering paths (chosen automatically):                          │
+   │   A) Service Worker (normal browsers):                                 │
+   │      Shell sends files to SW via postMessage → SW caches at            │
+   │      /p/assets/{slug}/* → iframe.src = SW URL → SW serves from cache   │
+   │   B) Blob fallback (in-app browsers like Telegram/Instagram on iOS):   │
+   │      WKWebView has no SW support. Shell creates blob URLs for all      │
+   │      files, rewrites HTML src/href via DOMParser, injects fetch/XHR    │
+   │      override + property setter patches → iframe.srcdoc = rewritten    │
+   │      HTML. No JS/CSS source files modified — only HTML attributes.     │
+   │                                                                        │
+   │   Both paths work for public and private pages — E2E decryption        │
+   │   happens before renderPage(), so pageData.files is always plaintext.  │
+   │   In practice, blob fallback primarily serves public pages shared via  │
+   │   in-app browsers (Telegram, Instagram). Private pages require login   │
+   │   + IndexedDB keys which in-app browsers don't have.                   │
 
 RUNTIME (every request, E2E encrypted):
 

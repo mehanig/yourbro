@@ -52,11 +52,15 @@ The API `Dockerfile` builds Go API. Frontend is NOT embedded — it deploys inde
 
 ### Pages architecture
 - Pages are **directory-based**: each page is a folder at `/data/yourbro/pages/{slug}/` with `index.html` + assets (JS, CSS, etc.)
-- Pages are multi-file by design. **NEVER suggest inlining assets** — the entire point is separate JS/CSS files served via Service Worker.
-- A Service Worker (`web/public/p/page-sw.js`) caches the file bundle and serves sub-resources at `/p/assets/{slug}/*`
-- The shell (`web/public/p/shell.html`) fetches the page bundle via E2E encrypted relay, caches files in the SW, then sets `iframe.src = "/p/assets/{slug}/index.html"` — the SW serves it. Relative URLs resolve naturally from the iframe's actual URL.
-- `sandbox="allow-scripts allow-same-origin"` is required for the iframe to use the parent's Service Worker
+- Pages are multi-file by design. **NEVER suggest inlining assets** — the entire point is separate files.
+- **Two rendering paths** (chosen automatically based on Service Worker availability):
+  - **SW path** (normal browsers): A Service Worker (`web/public/p/page-sw.js`) caches the file bundle and serves sub-resources at `/p/assets/{slug}/*`. The shell sets `iframe.src = "/p/assets/{slug}/index.html"` — the SW serves it. Relative URLs resolve naturally.
+  - **Blob fallback** (in-app browsers like Telegram/Instagram on iOS): WKWebView doesn't support Service Workers. The shell creates blob URLs for all files, rewrites `src`/`href` attributes in the HTML via DOM parsing (`DOMParser` + `querySelectorAll`), and injects a fetch/XHR/property-setter override so JS-initiated requests also resolve from blob URLs. The iframe loads via `srcdoc`. **No JS/CSS source files are ever modified** — only HTML attributes are rewritten. The override also patches `HTMLImageElement.src`, `HTMLScriptElement.src`, etc. property setters for dynamic DOM manipulation.
+- `sandbox="allow-scripts allow-same-origin"` is required on both paths — for SW access (SW path) and blob URL resolution (blob path)
 - Cloudflare Transform Rules: the `/p/*` shell rule excludes `.js`, `.css`, `.json` extensions so the SW file and cached assets are served correctly (not rewritten to shell.html)
+- Both rendering paths work for public and private pages — decryption (E2E relay) happens before `renderPage()`, so by the time it runs, `pageData.files` is plaintext regardless of source. In practice, the blob fallback primarily serves **public pages** shared via in-app browser links (Telegram, Instagram). Private pages require login + IndexedDB keys which in-app browsers don't have.
+- Guard: `if (parts[1] === 'assets') return;` prevents recursive shell reload when SW doesn't intercept `/p/assets/*` requests
+- **Debug mode**: append `?debug` to any page URL to see rendering path, SW state, blob map, and HTML preview as an on-screen overlay
 - **Page Storage**: Iframed pages communicate with the agent via `postMessage` → shell.html → E2E encrypted relay → agent `/api/page-storage/*` endpoints. No crypto in the iframe — shell is the encryption proxy. Slug is hardcoded by the shell (iframe can't write to other pages' storage).
 
 ### SECURITY: E2E encryption for page content relay
