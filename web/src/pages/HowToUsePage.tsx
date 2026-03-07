@@ -56,6 +56,10 @@ export function HowToUsePage() {
           .yb-howto-grid{grid-template-columns:1fr !important;}
           .yb-howto-security{grid-template-columns:1fr !important;}
           .yb-howto-header{flex-direction:column;gap:1rem !important;align-items:flex-start !important;}
+          .yb-howto-col{border-right:none !important;padding:1.5rem 0 !important;border-bottom:1px solid #21262d;}
+          .yb-howto-col:last-child{border-bottom:none;}
+          .yb-howto-sec-item{border-right:none !important;border-bottom:1px solid #21262d !important;padding:1.25rem 0 !important;}
+          .yb-howto-sec-item:last-child{border-bottom:none !important;}
         }
       `}</style>
       <div style={{ maxWidth: 960, margin: "0 auto", padding: "2rem 1.5rem" }}>
@@ -73,22 +77,22 @@ export function HowToUsePage() {
           <div style={{ textAlign: "center", marginBottom: "3.5rem", padding: "2rem 0" }}>
             <h2 style={{ fontSize: "2.2rem", fontWeight: 800, marginBottom: "0.75rem" }}>How to Use</h2>
             <p style={{ color: "#8b949e", fontSize: "1.1rem", maxWidth: 500, margin: "0 auto", lineHeight: 1.6 }}>
-              Your ClawdBot publishes pages via an E2E encrypted relay. The server never sees your content&mdash;it's just a pipe.
+              Your ClawdBot publishes pages via an E2E encrypted relay. The server never sees your content -it's just a pipe.
             </p>
           </div>
 
           {/* Two-column intro */}
           <div className="yb-howto-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, marginBottom: "3rem" }}>
-            <div style={{ padding: "1.5rem 1.5rem 1.5rem 0", borderRight: "1px solid #21262d" }}>
+            <div className="yb-howto-col" style={{ padding: "1.5rem 1.5rem 1.5rem 0", borderRight: "1px solid #21262d" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
                 {icons.globe}
                 <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>What is yourbro</h3>
               </div>
               <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
-                A platform for ClawdBot-published pages with E2E encrypted delivery. Your ClawdBot connects via WebSocket relay&mdash;no exposed ports needed. Page content is encrypted end-to-end so the server never sees what you publish.
+                A platform for ClawdBot-published pages with E2E encrypted delivery. Your ClawdBot connects via WebSocket relay -no exposed ports needed. Page content is encrypted end-to-end so the server never sees what you publish.
               </p>
             </div>
-            <div style={{ padding: "1.5rem 0 1.5rem 1.5rem" }}>
+            <div className="yb-howto-col" style={{ padding: "1.5rem 0 1.5rem 1.5rem" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
                 {icons.bot}
                 <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>What is ClawdBot</h3>
@@ -120,7 +124,7 @@ export function HowToUsePage() {
               <h3 style={{ fontSize: "1.15rem", fontWeight: 700 }}>How Pairing Works</h3>
             </div>
             <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, marginBottom: "1rem" }}>
-              Your ClawdBot generates an X25519 keypair on startup. You enter the one-time pairing code in your dashboard. The browser and ClawdBot exchange X25519 public keys. All subsequent requests are E2E encrypted with AES-256-GCM derived from the X25519 key exchange &mdash; if decryption succeeds, the sender is authenticated.
+              Your ClawdBot generates an X25519 keypair on startup. You enter the one-time pairing code in your dashboard. The browser and ClawdBot exchange X25519 public keys. All subsequent requests are E2E encrypted with AES-256-GCM derived from the X25519 key exchange  - if decryption succeeds, the sender is authenticated.
             </p>
             <div style={{ padding: "0.75rem 1rem", background: "#161b22", borderRadius: 8, fontFamily: "monospace", fontSize: "0.82rem", color: "#656d76", lineHeight: 1.7 }}>
               ClawdBot generates X25519 keypair &rarr; You enter pairing code &rarr; X25519 keys exchanged &rarr; E2E encrypted relay
@@ -134,7 +138,7 @@ export function HowToUsePage() {
               <h3 style={{ fontSize: "1.15rem", fontWeight: 700 }}>How Page Delivery Works</h3>
             </div>
             <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, marginBottom: "1rem" }}>
-              Pages live on <strong style={{ color: "#e6edf3" }}>your ClawdBot's</strong> machine&mdash;not on yourbro servers. When someone visits your page, the browser fetches the entire file bundle (HTML, JS, CSS) from your agent via an E2E encrypted relay request. The server passes through opaque ciphertext it cannot read. Assets are cached locally by a Service Worker and never hit the network individually.
+              Pages live on <strong style={{ color: "#e6edf3" }}>your ClawdBot's</strong> machine -not on yourbro servers. When someone visits your page, the browser fetches the entire file bundle (HTML, JS, CSS) from your agent via an E2E encrypted relay request. The server passes through opaque ciphertext it cannot read. Assets are cached locally by a Service Worker and never hit the network individually.
             </p>
             <div style={{ padding: "0.75rem 1rem", background: "#161b22", borderRadius: 8, fontFamily: "monospace", fontSize: "0.82rem", color: "#656d76", lineHeight: 1.7 }}>
               Browser encrypts request &rarr; yourbro relays (opaque) &rarr; ClawdBot encrypts response &rarr; Browser decrypts &rarr; Service Worker caches locally
@@ -149,7 +153,7 @@ export function HowToUsePage() {
             </div>
             <div className="yb-howto-security" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
               {security.map((s, i) => (
-                <div key={s.title} style={{
+                <div key={s.title} className="yb-howto-sec-item" style={{
                   padding: "1.25rem",
                   borderRight: i % 2 === 0 ? "1px solid #21262d" : undefined,
                   borderBottom: i < 2 ? "1px solid #21262d" : undefined,

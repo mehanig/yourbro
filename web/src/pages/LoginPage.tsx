@@ -11,7 +11,10 @@ export function LoginPage() {
           .yb-features{grid-template-columns:1fr !important;}
           .yb-hero h1{font-size:2.5rem !important;}
           .yb-hero-image{max-width:100% !important;}
-          .yb-step{padding:2rem 1.5rem !important;}
+          .yb-step{padding:2rem 1.5rem !important;border-right:none !important;border-bottom:1px solid #30363d !important;}
+          .yb-step:last-child{border-bottom:none !important;}
+          .yb-feature{border-right:none !important;border-bottom:1px solid #21262d !important;padding:1.5rem 0 !important;}
+          .yb-feature:last-child{border-bottom:none !important;}
         }
       `}</style>
 
@@ -76,7 +79,7 @@ export function LoginPage() {
           }}
         >
           Your ClawdBot publishes pages to the web via an encrypted relay. Page
-          content is end-to-end encrypted&mdash;the server never sees what you
+          content is end-to-end encrypted -the server never sees what you
           publish. No exposed ports, no cloud storage.
         </p>
         <div
@@ -258,6 +261,7 @@ export function LoginPage() {
           ].map((s, i) => (
             <div
               key={s.title}
+              className="yb-feature"
               style={{
                 padding: "2rem 2.5rem",
                 borderBottom: i < 2 ? "1px solid #21262d" : undefined,

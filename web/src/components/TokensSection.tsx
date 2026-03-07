@@ -185,7 +185,7 @@ function CreateTokenModal({
           ) : (
             <>
               <p style={{ color: "#3fb950", fontSize: "0.9rem", marginBottom: "0.75rem" }}>
-                Copy this token now — it won't be shown again.
+                Copy this token now - it won't be shown again.
               </p>
               <code
                 style={{

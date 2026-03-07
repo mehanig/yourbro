@@ -64,6 +64,7 @@ export function DashboardPage() {
     <>
       <style>{dashboardStyles}</style>
       <div
+        className="yb-dash-container"
         style={{ maxWidth: 1060, margin: "0 auto", padding: "2rem 1.5rem" }}
       >
         <DashboardHeader user={user} onLogout={logout} />
@@ -131,5 +132,7 @@ const dashboardStyles = `
   @media(max-width:700px){
     .yb-dash-grid{grid-template-columns:1fr !important;}
     .yb-dash-header{flex-direction:column;gap:1rem !important;align-items:flex-start !important;}
+    .yb-dash-section{padding:1.25rem 1rem !important;border-radius:10px !important;}
+    .yb-dash-container{padding:1.5rem 0.75rem !important;}
   }
 `;
