@@ -130,7 +130,7 @@ export function HowToUsePage() {
               <h3 style={{ fontSize: "1.15rem", fontWeight: 700 }}>How Page Delivery Works</h3>
             </div>
             <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
-              Pages live on <strong style={{ color: "#e6edf3" }}>your</strong> machine, not on yourbro servers. When someone visits your page, the content is fetched through an encrypted relay. The server only passes through data it cannot read. Paired users can see all your pages. Anonymous visitors can only see pages you've marked as public.
+              Pages live on <strong style={{ color: "#e6edf3" }}>your</strong> OpenClaw, not on yourbro servers. When someone visits your page, the content is fetched through an encrypted relay. The server only passes through data it cannot read. Paired users can see all your pages. Anonymous visitors can only see pages your OpenClaw marked as public.
             </p>
           </div>
 
