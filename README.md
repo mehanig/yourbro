@@ -70,15 +70,11 @@ Browser (yourbro.ai)     Cloudflare R2          api.yourbro.ai         Your Agen
    │  Decrypt response                              │                       │
    │  Render in sandboxed iframe                    │                       │
    │                                                                        │
-   │   Two rendering paths (chosen automatically):                          │
-   │   A) Service Worker (normal browsers):                                 │
-   │      Shell sends files to SW via postMessage → SW caches at            │
-   │      /p/assets/{slug}/* → iframe.src = SW URL → SW serves from cache   │
-   │   B) Blob fallback (in-app browsers like Telegram/Instagram on iOS):   │
-   │      WKWebView has no SW support. Shell creates blob URLs for all      │
-   │      files, rewrites HTML src/href via DOMParser, injects fetch/XHR    │
-   │      override + property setter patches → iframe.srcdoc = rewritten    │
-   │      HTML. No JS/CSS source files modified — only HTML attributes.     │
+   │   Rendering: shell converts all files to data URIs, rewrites HTML       │
+   │   src/href via DOMParser, injects fetch/XHR override + property        │
+   │   setter patches, loads via iframe srcdoc. sandbox="allow-scripts"     │
+   │   (no allow-same-origin) gives iframe an opaque origin, preventing     │
+   │   access to shell's IndexedDB keys. Works in all browsers.             │
 
 STORAGE (same E2E relay, no cookies needed):
 

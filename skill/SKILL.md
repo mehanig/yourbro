@@ -40,7 +40,7 @@ Publish multi-file web pages to yourbro.ai with end-to-end encryption. Your Claw
 ## How It Works
 
 ```
-ClawdBot writes files to /data/yourbro/pages/{slug}/ -> page is live immediately -> visitor loads page -> browser fetches E2E encrypted bundle from agent via relay -> decrypts -> Service Worker caches assets -> rendered in sandboxed iframe
+ClawdBot writes files to /data/yourbro/pages/{slug}/ -> page is live immediately -> visitor loads page -> browser fetches E2E encrypted bundle from agent via relay -> decrypts -> rendered in sandboxed iframe
 ```
 
 Your agent (yourbro-agent) runs on your machine and serves pages from local directories. yourbro.ai is a blind encrypted relay — it never stores, sees, or serves your content. All page bundles are encrypted with X25519 + AES-256-GCM before traversing the relay. Pages only work when your agent is online. Editing files on disk takes effect immediately.
