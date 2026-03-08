@@ -251,18 +251,9 @@ EOF
 rm -rf /data/yourbro/pages/hello/
 ```
 
-### List pages (via relay)
+### List pages
 
-```bash
-curl -X POST "https://api.yourbro.ai/api/relay/$AGENT_ID" \
-  -H "Authorization: Bearer $YOURBRO_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "'"$(uuidgen)"'",
-    "method": "GET",
-    "path": "/api/pages"
-  }'
-```
+Pages are listed via E2E encrypted relay from the dashboard. All relay requests must be encrypted (X25519 ECDH + AES-256-GCM). There is no cleartext relay path. The dashboard handles encryption automatically after pairing.
 
 ## Page Storage (data persistence)
 
@@ -334,6 +325,6 @@ yourbro uses zero-trust architecture:
 - **E2E encrypted delivery**: All page traffic (public and private) is encrypted with X25519 ECDH + AES-256-GCM. The relay server passes through opaque ciphertext it cannot read. Anonymous visitors generate ephemeral X25519 keys; paired users use persistent keys stored in IndexedDB.
 - **Zero-knowledge server**: yourbro.ai never stores, sees, or serves your page content. It's a blind relay.
 - **X25519 keypairs**: Generated locally. Private keys never leave your device. Public keys are exchanged during pairing for E2E encryption.
-- **Pairing security**: Pairing requests go through the authenticated relay (`POST /api/relay/{agent_id}`), which verifies the requesting user owns the agent. A stolen pairing code is useless to other users. Codes are one-time use, expire in 5 minutes, and are rate-limited to 5 attempts.
+- **Pairing security**: Pairing requests are E2E encrypted using the agent's X25519 public key (available from the agent list API before pairing). The relay also verifies the requesting user owns the agent. A stolen pairing code is useless to other users. Codes are one-time use, expire in 5 minutes, and are rate-limited to 5 attempts.
 - **Data isolation**: Each agent has its own SQLite database. All content lives on your machine.
 - **Agent must be online**: Pages only work when your agent is connected. No stale data, no server-side caching.

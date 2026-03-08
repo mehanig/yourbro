@@ -83,9 +83,11 @@ Individual assets (JS, CSS, etc.) are **never fetched over the network**. After 
 **Page Storage** also goes through the same E2E encrypted relay — no cookies needed. The agent decides access based on `key_id`.
 
 ### Auth
-- **Dashboard**: httpOnly `yb_session` cookie (JWT, cross-subdomain via `COOKIE_DOMAIN`) for managing agents, tokens, and page list via `/api/relay/{agentId}`
-- **Page viewing**: no cookies — E2E encryption via X25519 keypairs in IndexedDB is the sole auth mechanism. Discovery + encrypted relay via `/api/public-page/` endpoints (no session required)
+- **All relay traffic is E2E encrypted**. There is no cleartext relay path. The agent rejects non-encrypted requests with 400. The API relay endpoint also enforces `encrypted`, `key_id`, and `payload`.
+- **Dashboard**: httpOnly `yb_session` cookie (JWT, cross-subdomain via `COOKIE_DOMAIN`) for session management. All agent communication (page listing, pairing, deletion) uses E2E encrypted relay via `/api/relay/{agentId}`. The agent's X25519 public key is available in the `/api/agents` response and SSE stream (as `x25519_public`, base64url).
+- **Page viewing**: no cookies. E2E encryption via X25519 keypairs in IndexedDB is the sole auth mechanism. Discovery + encrypted relay via `/api/public-page/` endpoints (no session required).
 - **Agent → API**: Bearer API tokens via Authorization header on WebSocket connect
-- **Relay ownership**: `POST /api/relay/{agent_id}` verifies `agent.UserID == session.UserID` — only the agent's owner can relay to it. This protects pairing: a stolen pairing code is useless to other users since they can't reach the agent's `/api/pair` endpoint through the relay.
-- **Pairing codes**: one-time use, 5-minute expiry, max 5 attempts, constant-time comparison. Agent logs an E2E fingerprint for optional out-of-band verification.
+- **Relay ownership**: `POST /api/relay/{agent_id}` verifies `agent.UserID == session.UserID`. Only the agent's owner can relay to it. This protects pairing: a stolen pairing code is useless to other users since they can't reach the agent's `/api/pair` endpoint through the relay.
+- **Pairing**: E2E encrypted using the agent's X25519 public key (available from the agent list before pairing). Pairing codes are one-time use, 5-minute expiry, max 5 attempts, constant-time comparison. Agent logs an E2E fingerprint for optional out-of-band verification.
+- **key_id transport**: The relay router injects `key_id` into request context (not HTTP headers) after E2E decryption. Handlers read it via `handlers.KeyIDFromRequest(r)`. This prevents header spoofing.
 - OAuth callback at `api.yourbro.ai/auth/google/callback`, redirects to `yourbro.ai/#/callback`

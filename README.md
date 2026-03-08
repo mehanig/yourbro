@@ -302,7 +302,7 @@ bash deploy/deploy.sh
 | GET | `/api/agents` | Cookie | List agents (with online status) |
 | GET | `/api/agents/stream` | Cookie | SSE stream for real-time agent status |
 | DELETE | `/api/agents/{id}` | Cookie | Remove agent |
-| POST | `/api/relay/{agent_id}` | Cookie | Authenticated relay to agent (dashboard operations) |
+| POST | `/api/relay/{agent_id}` | Cookie + E2E | E2E encrypted relay to agent (all dashboard operations). Requires `encrypted`, `key_id`, `payload`. |
 | GET | `/ws/agent` | Bearer | WebSocket endpoint for agent connection (sends `x25519_pub`) |
 | POST | `/api/tokens` | Cookie | Create API token |
 | GET | `/api/tokens` | Cookie | List API tokens |
@@ -311,15 +311,14 @@ bash deploy/deploy.sh
 
 ### Agent (reached via relay)
 
-All agent endpoints are accessed through E2E encrypted relay. The relay envelope wraps the method, path, headers, and encrypted payload.
+All agent endpoints are accessed through E2E encrypted relay only. There is no cleartext relay path. The relay envelope wraps the encrypted payload containing method, path, headers, and body.
 
 | Method | Path | Access | Description |
 |---|---|---|---|
-| GET | `/health` | Any | Health check |
-| POST | `/api/pair` | Pairing code | Register browser's X25519 public key |
+| POST | `/api/pair` | E2E + Pairing code | Register browser's X25519 public key |
 | POST | `/api/auth-check` | Paired | Check if browser is paired (decryption = auth) |
 | POST | `/api/revoke-key` | Paired | Revoke browser's encryption key |
-| GET | `/api/pages` | Any | List all pages (scans page directories) |
+| GET | `/api/pages` | Paired | List all pages (paired users only, anonymous get empty list) |
 | GET | `/api/page/{slug}` | Paired or public | Get page file bundle — paired users: any page; anonymous: public only |
 | POST | `/api/page-storage/get` | E2E relay | Get storage value |
 | POST | `/api/page-storage/set` | E2E relay | Set storage value |
