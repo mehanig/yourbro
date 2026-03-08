@@ -43,6 +43,11 @@ func NewHub(db *storage.DB, notify func(userID int64)) *Hub {
 	}
 }
 
+// GetAgentByUUID delegates to the database.
+func (h *Hub) GetAgentByUUID(ctx context.Context, uuid string) (*models.Agent, error) {
+	return h.DB.GetAgentByUUID(ctx, uuid)
+}
+
 // IsOnline checks if an agent is connected via WebSocket.
 func (h *Hub) IsOnline(agentUUID string) bool {
 	h.mu.RLock()

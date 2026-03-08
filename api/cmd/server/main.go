@@ -127,7 +127,7 @@ func main() {
 	relayHub := relay.NewHub(db, sseBroker.NotifyUser)
 	sseBroker.Hub = relayHub
 	agentsHandler := &handlers.AgentsHandler{DB: db, Broker: sseBroker, Hub: relayHub}
-	relayHandler := &handlers.RelayHandler{Hub: relayHub}
+	relayHandler := &handlers.RelayHandler{Backend: relayHub}
 	viewRecorder := analytics.New(db, 256, 4)
 
 	r := chi.NewRouter()

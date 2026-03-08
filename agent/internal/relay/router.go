@@ -19,16 +19,16 @@ import (
 
 // Router adapts relay messages to http.Handler calls.
 type Router struct {
-	Mux         http.Handler
-	CipherCache *e2e.CipherCache // nil = E2E disabled
-	DB          *storage.DB      // for looking up user X25519 keys
+	Mux          http.Handler
+	AgentPrivKey *ecdh.PrivateKey // nil = E2E disabled
+	DB           *storage.DB     // for looking up user X25519 keys
 }
 
 // HandleRequest converts a relay Request into an http.Request, routes it
 // through the chi router, and returns the Response.
 func (r *Router) HandleRequest(ctx context.Context, req Request) Response {
 	// Handle E2E encrypted requests
-	if req.Encrypted && r.CipherCache != nil {
+	if req.Encrypted && r.AgentPrivKey != nil {
 		return r.handleEncryptedRequest(ctx, req)
 	}
 
@@ -112,7 +112,7 @@ func (r *Router) getUserCipher(keyID string) (*e2e.Cipher, error) {
 			// 1. Try paired user lookup (authorized_keys)
 			pub, err := r.DB.GetX25519KeyByPublicBytes(keyBytes)
 			if err == nil {
-				return r.CipherCache.Get(pub)
+				return e2e.NewCipher(r.AgentPrivKey, pub)
 			}
 
 			// 2. Accept anonymous key directly (for public page viewers)
@@ -121,7 +121,7 @@ func (r *Router) getUserCipher(keyID string) (*e2e.Cipher, error) {
 			if err != nil {
 				return nil, fmt.Errorf("invalid X25519 public key")
 			}
-			return r.CipherCache.Get(anonPub)
+			return e2e.NewCipher(r.AgentPrivKey, anonPub)
 		}
 		return nil, fmt.Errorf("invalid key_id encoding")
 	}
@@ -134,7 +134,7 @@ func (r *Router) getUserCipher(keyID string) (*e2e.Cipher, error) {
 	if len(keys) > 1 {
 		log.Printf("E2E: WARNING — multiple paired users but no key_id in request, using first key")
 	}
-	return r.CipherCache.Get(keys[0])
+	return e2e.NewCipher(r.AgentPrivKey, keys[0])
 }
 
 // allowedRelayPrefixes defines which paths the relay is allowed to forward.

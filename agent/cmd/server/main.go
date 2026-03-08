@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ecdh"
 	"crypto/rand"
 	"fmt"
 	"log"
@@ -16,7 +17,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-	"github.com/mehanig/yourbro/agent/internal/e2e"
 	"github.com/mehanig/yourbro/agent/internal/handlers"
 	mw "github.com/mehanig/yourbro/agent/internal/middleware"
 	"github.com/mehanig/yourbro/agent/internal/relay"
@@ -110,13 +110,13 @@ func main() {
 	log.Printf("Connecting to %s via WebSocket", serverURL)
 
 	// Initialize E2E encryption and agent identity
-	var cipherCache *e2e.CipherCache
+	var agentPrivKey *ecdh.PrivateKey
 	var agentUUID string
 	var x25519PubBytes []byte
 	if identity, err := db.GetOrCreateIdentity(); err != nil {
 		log.Printf("WARNING: E2E encryption disabled: %v", err)
 	} else {
-		cipherCache = e2e.NewCipherCache(identity.X25519PrivateKey)
+		agentPrivKey = identity.X25519PrivateKey
 		agentUUID = identity.UUID
 		x25519PubBytes = identity.X25519PublicKey.Bytes()
 		log.Printf("Agent UUID: %s", agentUUID)
@@ -135,7 +135,7 @@ func main() {
 		}
 	}()
 
-	router := &relay.Router{Mux: r, CipherCache: cipherCache, DB: db}
+	router := &relay.Router{Mux: r, AgentPrivKey: agentPrivKey, DB: db}
 	client := &relay.Client{
 		ServerURL:    serverURL,
 		APIToken:     apiToken,

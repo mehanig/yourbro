@@ -99,6 +99,8 @@ Browser              api.yourbro.ai          Your Agent
 - **Server admin snoops** → E2E encryption means relay traffic is opaque to the server
 - **Agent A compromised** → cannot read Agent B (separate SQLite, separate keys)
 - **Server JS injection** → WebCrypto non-extractable keys prevent key theft; malicious JS can use the key while tab is open (full protection requires native app)
+- **Stolen pairing code** → useless to other users. The relay enforces ownership: only the user whose API token registered the agent can send requests to it (`POST /api/relay/{agent_id}` checks `agent.UserID == session.UserID`). The code itself is also one-time use, expires in 5 minutes, and rate-limited to 5 attempts
+- **Stolen key_id** → harmless. The `key_id` is the sender's X25519 public key (public by definition). Forging requests requires the matching private key — without it, ECDH produces a different shared secret and decryption fails
 
 ## Quick Start (Local Docker)
 

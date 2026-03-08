@@ -48,48 +48,13 @@ func TestRouter_EncryptedRoundTrip(t *testing.T) {
 
 	// Generate keypairs (simulating browser + agent)
 	agentPriv, _ := ecdh.X25519().GenerateKey(rand.Reader)
-	userPriv, _ := ecdh.X25519().GenerateKey(rand.Reader)
 
-	cipherCache := e2e.NewCipherCache(agentPriv)
-
-	// Router uses agent's private key + user's public key for decryption
+	// Router uses agent's private key for E2E
 	router := &Router{
-		Mux:         mux,
-		CipherCache: cipherCache,
-		DB:          nil, // We'll call handleEncryptedRequest directly
+		Mux:          mux,
+		AgentPrivKey: agentPriv,
+		DB:           nil,
 	}
-
-	// Browser side: encrypt a request using user's private key + agent's public key
-	userCipher, err := e2e.NewCipher(userPriv, agentPriv.PublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	innerReq := Request{
-		Method: "GET",
-		Path:   "/api/storage/test/key1",
-	}
-	innerJSON, _ := json.Marshal(innerReq)
-	encrypted, err := userCipher.Encrypt(innerJSON)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Build the encrypted relay request
-	encReq := Request{
-		ID:        "enc-1",
-		Encrypted: true,
-		Payload:   base64.StdEncoding.EncodeToString(encrypted),
-	}
-
-	// We need to test with the cipher directly since getUserCipher uses DB
-	// Instead, let's pre-populate the cache
-	_, _ = cipherCache.Get(userPriv.PublicKey())
-
-	// Call handleEncryptedRequest directly (bypasses getUserCipher)
-	// To test the full flow, we need a DB mock that returns the user's key
-	// For now, test the cleartext path works and E2E crypto independently
-	_ = encReq // We tested crypto separately in e2e_test.go
 
 	// Test cleartext still works through HandleRequest
 	resp := router.HandleRequest(context.Background(), Request{
@@ -106,11 +71,11 @@ func TestRouter_EncryptedRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRouter_EncryptedRequest_NoCipherCache(t *testing.T) {
+func TestRouter_EncryptedRequest_NoPrivKey(t *testing.T) {
 	mux := chi.NewRouter()
-	router := &Router{Mux: mux, CipherCache: nil}
+	router := &Router{Mux: mux, AgentPrivKey: nil}
 
-	// Encrypted request without cipher cache should fall through to cleartext
+	// Encrypted request without agent private key should fall through to cleartext
 	resp := router.HandleRequest(context.Background(), Request{
 		ID:        "enc-no-cache",
 		Encrypted: true,
@@ -119,7 +84,7 @@ func TestRouter_EncryptedRequest_NoCipherCache(t *testing.T) {
 		Path:      "/health",
 	})
 
-	// Should be treated as cleartext since CipherCache is nil
+	// Should be treated as cleartext since AgentPrivKey is nil
 	// The cleartext handler will try to route /health
 	_ = resp
 }
@@ -162,7 +127,6 @@ func newTestSqliteDB(t *testing.T) *storage.DB {
 func TestRouter_AnonymousKeyE2ERoundTrip(t *testing.T) {
 	db := newTestSqliteDB(t)
 	agentPriv, _ := ecdh.X25519().GenerateKey(rand.Reader)
-	cipherCache := e2e.NewCipherCache(agentPriv)
 
 	// Create a public page
 	pagesDir := t.TempDir()
@@ -196,7 +160,7 @@ func TestRouter_AnonymousKeyE2ERoundTrip(t *testing.T) {
 		w.Write([]byte(`{"slug":"test-page","title":"Test","files":{"index.html":"<h1>Hello</h1>"}}`))
 	})
 
-	router := &Router{Mux: mux, CipherCache: cipherCache, DB: db}
+	router := &Router{Mux: mux, AgentPrivKey: agentPriv, DB: db}
 
 	// Anonymous viewer generates a key pair
 	anonPriv, _ := ecdh.X25519().GenerateKey(rand.Reader)
@@ -260,7 +224,6 @@ func TestRouter_AnonymousKeyE2ERoundTrip(t *testing.T) {
 func TestRouter_AnonymousKeyDeniedForPrivatePage(t *testing.T) {
 	db := newTestSqliteDB(t)
 	agentPriv, _ := ecdh.X25519().GenerateKey(rand.Reader)
-	cipherCache := e2e.NewCipherCache(agentPriv)
 
 	mux := chi.NewRouter()
 	mux.Get("/api/page/{slug}", func(w http.ResponseWriter, r *http.Request) {
@@ -275,7 +238,7 @@ func TestRouter_AnonymousKeyDeniedForPrivatePage(t *testing.T) {
 		w.Write([]byte(`{"slug":"private-page"}`))
 	})
 
-	router := &Router{Mux: mux, CipherCache: cipherCache, DB: db}
+	router := &Router{Mux: mux, AgentPrivKey: agentPriv, DB: db}
 
 	anonPriv, _ := ecdh.X25519().GenerateKey(rand.Reader)
 	anonKeyID := base64.RawURLEncoding.EncodeToString(anonPriv.PublicKey().Bytes())
