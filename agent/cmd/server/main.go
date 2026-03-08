@@ -90,7 +90,7 @@ func main() {
 	r.Get("/api/pages", pagesHandler.List)
 	r.Get("/api/page/{slug}", pagesHandler.Get)
 
-	// Page storage routes (auth via E2E encryption — only paired users can decrypt/encrypt)
+	// Page storage routes — handler checks X-Yourbro-Key-ID against authorized_keys
 	r.Post("/api/page-storage/get", pageStorageHandler.Get)
 	r.Post("/api/page-storage/set", pageStorageHandler.Set)
 	r.Post("/api/page-storage/delete", pageStorageHandler.Delete)

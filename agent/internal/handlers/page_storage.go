@@ -9,10 +9,26 @@ import (
 )
 
 // PageStorageHandler serves /api/page-storage/* endpoints.
-// No auth middleware — requests arrive pre-authenticated via E2E encrypted relay.
+// Access requires a paired user (X-Yourbro-Key-ID must match authorized_keys).
 // Slug is provided in the request body (not URL), hardcoded by shell.html.
 type PageStorageHandler struct {
 	DB *storage.DB
+}
+
+// requirePairedUser checks X-Yourbro-Key-ID against authorized_keys.
+// Returns true if the caller is a paired user, false (and writes 403) otherwise.
+func (h *PageStorageHandler) requirePairedUser(w http.ResponseWriter, r *http.Request) bool {
+	keyID := r.Header.Get("X-Yourbro-Key-ID")
+	if keyID == "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
+		return false
+	}
+	_, ok := h.DB.IsX25519KeyAuthorized(keyID)
+	if !ok {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
+		return false
+	}
+	return true
 }
 
 type pageStorageRequest struct {
@@ -35,6 +51,9 @@ func (h *PageStorageHandler) parseRequest(r *http.Request) (*pageStorageRequest,
 }
 
 func (h *PageStorageHandler) Get(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePairedUser(w, r) {
+		return
+	}
 	req, err := h.parseRequest(r)
 	if err != nil || req.Slug == "" || req.Key == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug and key are required"})
@@ -51,6 +70,9 @@ func (h *PageStorageHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PageStorageHandler) Set(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePairedUser(w, r) {
+		return
+	}
 	req, err := h.parseRequest(r)
 	if err != nil || req.Slug == "" || req.Key == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug and key are required"})
@@ -71,6 +93,9 @@ func (h *PageStorageHandler) Set(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PageStorageHandler) List(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePairedUser(w, r) {
+		return
+	}
 	req, err := h.parseRequest(r)
 	if err != nil || req.Slug == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug is required"})
@@ -90,6 +115,9 @@ func (h *PageStorageHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PageStorageHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePairedUser(w, r) {
+		return
+	}
 	req, err := h.parseRequest(r)
 	if err != nil || req.Slug == "" || req.Key == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug and key are required"})
