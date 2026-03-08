@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -8,6 +9,19 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/mehanig/yourbro/agent/internal/storage"
 )
+
+type contextKey struct{}
+
+// WithKeyID returns a new context with the given key ID.
+func WithKeyID(ctx context.Context, keyID string) context.Context {
+	return context.WithValue(ctx, contextKey{}, keyID)
+}
+
+// KeyIDFromRequest extracts the key ID set by the relay router.
+func KeyIDFromRequest(r *http.Request) string {
+	v, _ := r.Context().Value(contextKey{}).(string)
+	return v
+}
 
 type StorageHandler struct {
 	DB *storage.DB

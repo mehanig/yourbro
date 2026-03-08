@@ -14,7 +14,7 @@ import (
 // newIntegrationRouter builds a full agent router matching the new architecture:
 // - Pairing via POST /api/pair
 // - Auth check via POST /api/auth-check (no middleware — E2E relay is auth)
-// - Key revocation via POST /api/revoke-key (X-Yourbro-Key-ID header)
+// - Key revocation via POST /api/revoke-key (key_id from context)
 // - Storage routes (no middleware — reached via E2E encrypted relay)
 func newIntegrationRouter(t *testing.T) (*PairHandler, *chi.Mux) {
 	t.Helper()
@@ -123,9 +123,9 @@ func TestIntegration_PairRevokeKey(t *testing.T) {
 		t.Fatal("should be authorized after pairing")
 	}
 
-	// Revoke key via X-Yourbro-Key-ID header
+	// Revoke key via context key_id (set by relay router after E2E decryption)
 	req = httptest.NewRequest("POST", "/api/revoke-key", nil)
-	req.Header.Set("X-Yourbro-Key-ID", keyID)
+	req = req.WithContext(WithKeyID(req.Context(), keyID))
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

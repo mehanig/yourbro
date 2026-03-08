@@ -137,9 +137,9 @@ func (h *PairHandler) Regenerate(genCode func(int) string) string {
 }
 
 // RevokeKey handles POST /api/revoke-key — removes the X25519 key from authorized_keys.
-// Auth is via E2E encryption — relay router injects X-Yourbro-Key-ID header after decryption.
+// Auth is via E2E encryption — relay router injects key_id into request context after decryption.
 func (h *PairHandler) RevokeKey(w http.ResponseWriter, r *http.Request) {
-	keyID := r.Header.Get("X-Yourbro-Key-ID")
+	keyID := KeyIDFromRequest(r)
 	if keyID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no key ID in request"})
 		return

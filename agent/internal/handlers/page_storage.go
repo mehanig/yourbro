@@ -9,16 +9,16 @@ import (
 )
 
 // PageStorageHandler serves /api/page-storage/* endpoints.
-// Access requires a paired user (X-Yourbro-Key-ID must match authorized_keys).
+// Access requires a paired user (key_id from context must match authorized_keys).
 // Slug is provided in the request body (not URL), hardcoded by shell.html.
 type PageStorageHandler struct {
 	DB *storage.DB
 }
 
-// requirePairedUser checks X-Yourbro-Key-ID against authorized_keys.
+// requirePairedUser checks the request context key_id against authorized_keys.
 // Returns true if the caller is a paired user, false (and writes 403) otherwise.
 func (h *PageStorageHandler) requirePairedUser(w http.ResponseWriter, r *http.Request) bool {
-	keyID := r.Header.Get("X-Yourbro-Key-ID")
+	keyID := KeyIDFromRequest(r)
 	if keyID == "" {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
 		return false

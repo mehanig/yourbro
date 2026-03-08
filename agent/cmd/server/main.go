@@ -82,7 +82,7 @@ func main() {
 		w.Write([]byte(`{"status":"paired"}`))
 	})
 
-	// Key revocation — via E2E encrypted relay (relay router injects X-Yourbro-Key-ID)
+	// Key revocation — via E2E encrypted relay (relay router injects key_id into context)
 	r.Post("/api/revoke-key", pairHandler.RevokeKey)
 
 	// Page routes — read-only via relay. Pages are created by ClawdBot internally.
@@ -90,7 +90,7 @@ func main() {
 	r.Get("/api/pages", pagesHandler.List)
 	r.Get("/api/page/{slug}", pagesHandler.Get)
 
-	// Page storage routes — handler checks X-Yourbro-Key-ID against authorized_keys
+	// Page storage routes — handler checks context key_id against authorized_keys
 	r.Post("/api/page-storage/get", pageStorageHandler.Get)
 	r.Post("/api/page-storage/set", pageStorageHandler.Set)
 	r.Post("/api/page-storage/delete", pageStorageHandler.Delete)

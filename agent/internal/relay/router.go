@@ -14,6 +14,7 @@ import (
 	"crypto/ecdh"
 
 	"github.com/mehanig/yourbro/agent/internal/e2e"
+	"github.com/mehanig/yourbro/agent/internal/handlers"
 	"github.com/mehanig/yourbro/agent/internal/storage"
 )
 
@@ -69,12 +70,9 @@ func (r *Router) handleEncryptedRequest(ctx context.Context, req Request) Respon
 	}
 	innerReq.ID = req.ID
 
-	// Inject key_id so inner handlers know which user made the request
+	// Inject key_id into context so handlers can identify the user
 	if req.KeyID != "" {
-		if innerReq.Headers == nil {
-			innerReq.Headers = make(map[string]string)
-		}
-		innerReq.Headers["X-Yourbro-Key-ID"] = req.KeyID
+		ctx = handlers.WithKeyID(ctx, req.KeyID)
 	}
 
 	// Process the cleartext request

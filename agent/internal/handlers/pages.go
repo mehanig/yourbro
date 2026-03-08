@@ -39,6 +39,11 @@ type pageBundle struct {
 }
 
 func (h *PagesHandler) List(w http.ResponseWriter, r *http.Request) {
+	if !h.isPairedUser(KeyIDFromRequest(r)) {
+		writeJSON(w, http.StatusOK, []pageSummary{})
+		return
+	}
+
 	entries, err := os.ReadDir(h.PagesDir)
 	if err != nil {
 		writeJSON(w, http.StatusOK, []pageSummary{})
@@ -152,12 +157,11 @@ func (h *PagesHandler) buildBundle(slug string) (*pageBundle, int) {
 	}, http.StatusOK
 }
 
-// Get serves a page bundle. Access control is based on X-Yourbro-Key-ID:
+// Get serves a page bundle. Access control is based on context key_id:
 // paired user (key_id in authorized_keys) → any page; anonymous → public:true only.
 func (h *PagesHandler) Get(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
-	keyID := r.Header.Get("X-Yourbro-Key-ID")
-	isPaired := h.isPairedUser(keyID)
+	isPaired := h.isPairedUser(KeyIDFromRequest(r))
 	meta := readPageMeta(h.PagesDir, slug)
 
 	if !isPaired && !meta.Public {

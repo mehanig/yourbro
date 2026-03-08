@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/mehanig/yourbro/agent/internal/e2e"
+	"github.com/mehanig/yourbro/agent/internal/handlers"
 	"github.com/mehanig/yourbro/agent/internal/storage"
 )
 
@@ -139,7 +140,7 @@ func TestRouter_AnonymousKeyE2ERoundTrip(t *testing.T) {
 	mux.Get("/api/page/{slug}", func(w http.ResponseWriter, r *http.Request) {
 		// Simplified page handler that checks access
 		slug := chi.URLParam(r, "slug")
-		keyID := r.Header.Get("X-Yourbro-Key-ID")
+		keyID := handlers.KeyIDFromRequest(r)
 		// Anonymous user (not in authorized_keys) — only serve public pages
 		_, isPaired := db.IsX25519KeyAuthorized(keyID)
 		if !isPaired {
@@ -227,7 +228,7 @@ func TestRouter_AnonymousKeyDeniedForPrivatePage(t *testing.T) {
 
 	mux := chi.NewRouter()
 	mux.Get("/api/page/{slug}", func(w http.ResponseWriter, r *http.Request) {
-		keyID := r.Header.Get("X-Yourbro-Key-ID")
+		keyID := handlers.KeyIDFromRequest(r)
 		_, isPaired := db.IsX25519KeyAuthorized(keyID)
 		if !isPaired {
 			w.Header().Set("Content-Type", "application/json")

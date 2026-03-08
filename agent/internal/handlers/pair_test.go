@@ -224,9 +224,9 @@ func TestRevokeKey_Success(t *testing.T) {
 		t.Fatalf("pair: want 200, got %d", w.Code)
 	}
 
-	// Now revoke via POST with X-Yourbro-Key-ID header
+	// Now revoke via POST with key_id in context (set by relay router after E2E decryption)
 	delReq := httptest.NewRequest("POST", "/api/revoke-key", nil)
-	delReq.Header.Set("X-Yourbro-Key-ID", keyID)
+	delReq = delReq.WithContext(WithKeyID(delReq.Context(), keyID))
 	delW := httptest.NewRecorder()
 	router.ServeHTTP(delW, delReq)
 	if delW.Code != http.StatusOK {
