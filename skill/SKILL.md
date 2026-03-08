@@ -123,7 +123,7 @@ echo '{"title": "My Portfolio", "public": false}' > /data/yourbro/pages/my-page/
 
 If `page.json` is missing or has no `"public"` field, the page defaults to **private**.
 
-Public pages are served in plaintext (no E2E encryption) and do not have access to page storage. The agent must still be online to serve public pages.
+All pages (public and private) are served through E2E encryption — anonymous visitors generate ephemeral X25519 keys. Public pages do not have access to page storage. The agent must still be online to serve public pages.
 
 ## File Locations
 
@@ -331,8 +331,9 @@ All storage is scoped to the page slug and E2E encrypted through the relay. Your
 
 yourbro uses zero-trust architecture:
 
-- **E2E encrypted delivery**: Page bundles are encrypted with X25519 ECDH + AES-256-GCM. The relay server passes through opaque ciphertext it cannot read.
+- **E2E encrypted delivery**: All page traffic (public and private) is encrypted with X25519 ECDH + AES-256-GCM. The relay server passes through opaque ciphertext it cannot read. Anonymous visitors generate ephemeral X25519 keys; paired users use persistent keys stored in IndexedDB.
 - **Zero-knowledge server**: yourbro.ai never stores, sees, or serves your page content. It's a blind relay.
 - **X25519 keypairs**: Generated locally. Private keys never leave your device. Public keys are exchanged during pairing for E2E encryption.
+- **Pairing security**: Pairing requests go through the authenticated relay (`POST /api/relay/{agent_id}`), which verifies the requesting user owns the agent. A stolen pairing code is useless to other users. Codes are one-time use, expire in 5 minutes, and are rate-limited to 5 attempts.
 - **Data isolation**: Each agent has its own SQLite database. All content lives on your machine.
 - **Agent must be online**: Pages only work when your agent is connected. No stale data, no server-side caching.
