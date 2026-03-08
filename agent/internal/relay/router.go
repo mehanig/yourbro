@@ -28,12 +28,13 @@ type Router struct {
 // HandleRequest converts a relay Request into an http.Request, routes it
 // through the chi router, and returns the Response.
 func (r *Router) HandleRequest(ctx context.Context, req Request) Response {
-	// Handle E2E encrypted requests
-	if req.Encrypted && r.AgentPrivKey != nil {
-		return r.handleEncryptedRequest(ctx, req)
+	// All relay requests must be E2E encrypted
+	if !req.Encrypted || r.AgentPrivKey == nil {
+		body := `{"error":"encryption required"}`
+		return Response{ID: req.ID, Status: 400, Body: &body}
 	}
 
-	return r.handleCleartextRequest(ctx, req)
+	return r.handleEncryptedRequest(ctx, req)
 }
 
 func (r *Router) handleEncryptedRequest(ctx context.Context, req Request) Response {

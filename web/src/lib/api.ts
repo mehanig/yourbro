@@ -126,6 +126,7 @@ export interface Agent {
   name: string;
   paired_at: string;
   is_online: boolean;
+  x25519_public?: string; // base64url-encoded X25519 public key
 }
 
 export function listAgents(): Promise<Agent[]> {

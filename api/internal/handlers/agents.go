@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 
@@ -46,14 +47,23 @@ func (h *AgentsHandler) List(w http.ResponseWriter, r *http.Request) {
 		agents = []models.Agent{}
 	}
 
-	// Check WebSocket hub for online status
-	if h.Hub != nil {
-		for i := range agents {
-			agents[i].IsOnline = h.Hub.IsOnline(agents[i].ID)
+	// Build response with online status and X25519 public keys
+	type agentResp struct {
+		models.Agent
+		X25519Public string `json:"x25519_public,omitempty"`
+	}
+	resp := make([]agentResp, len(agents))
+	for i, a := range agents {
+		if h.Hub != nil {
+			a.IsOnline = h.Hub.IsOnline(a.ID)
+		}
+		resp[i] = agentResp{Agent: a}
+		if len(a.X25519PubKey) > 0 {
+			resp[i].X25519Public = base64.RawURLEncoding.EncodeToString(a.X25519PubKey)
 		}
 	}
 
-	writeJSON(w, http.StatusOK, agents)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *AgentsHandler) Delete(w http.ResponseWriter, r *http.Request) {

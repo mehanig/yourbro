@@ -55,9 +55,10 @@ func TestRelay_OtherUserCannotRelayToAgent(t *testing.T) {
 
 	makeRequest := func(userID int64) *httptest.ResponseRecorder {
 		body, _ := json.Marshal(models.RelayRequest{
-			ID:     "req-1",
-			Method: "GET",
-			Path:   "/health",
+			ID:        "req-1",
+			Encrypted: true,
+			KeyID:     "test-key-id",
+			Payload:   "dGVzdA==",
 		})
 		req := httptest.NewRequest("POST", "/api/relay/"+agentUUID, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -91,9 +92,10 @@ func TestRelay_NonexistentAgent(t *testing.T) {
 	r.Post("/api/relay/{agent_id}", handler.Relay)
 
 	body, _ := json.Marshal(models.RelayRequest{
-		ID:     "req-2",
-		Method: "GET",
-		Path:   "/health",
+		ID:        "req-2",
+		Encrypted: true,
+		KeyID:     "test-key-id",
+		Payload:   "dGVzdA==",
 	})
 	req := httptest.NewRequest("POST", "/api/relay/nonexistent-uuid", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -123,9 +125,10 @@ func TestRelay_OfflineAgent(t *testing.T) {
 	r.Post("/api/relay/{agent_id}", handler.Relay)
 
 	body, _ := json.Marshal(models.RelayRequest{
-		ID:     "req-3",
-		Method: "GET",
-		Path:   "/health",
+		ID:        "req-3",
+		Encrypted: true,
+		KeyID:     "test-key-id",
+		Payload:   "dGVzdA==",
 	})
 	req := httptest.NewRequest("POST", "/api/relay/"+agentUUID, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

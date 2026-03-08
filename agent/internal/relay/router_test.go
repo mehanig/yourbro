@@ -17,98 +17,36 @@ import (
 	"github.com/mehanig/yourbro/agent/internal/storage"
 )
 
-func TestRouter_CleartextRequest(t *testing.T) {
+func TestRouter_CleartextRejected(t *testing.T) {
 	mux := chi.NewRouter()
 	mux.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	router := &Router{Mux: mux}
+	router := &Router{Mux: mux, AgentPrivKey: nil}
 	resp := router.HandleRequest(context.Background(), Request{
 		ID:     "test-1",
 		Method: "GET",
 		Path:   "/health",
 	})
 
-	if resp.Status != 200 {
-		t.Fatalf("expected 200, got %d", resp.Status)
-	}
-	if resp.Body == nil || *resp.Body != `{"status":"ok"}` {
-		t.Fatalf("unexpected body: %v", resp.Body)
+	if resp.Status != 400 {
+		t.Fatalf("cleartext should be rejected, got status %d", resp.Status)
 	}
 }
 
-func TestRouter_EncryptedRoundTrip(t *testing.T) {
-	// Set up a simple handler
-	mux := chi.NewRouter()
-	mux.Get("/api/storage/test/key1", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"value":"hello"}`))
-	})
-
-	// Generate keypairs (simulating browser + agent)
-	agentPriv, _ := ecdh.X25519().GenerateKey(rand.Reader)
-
-	// Router uses agent's private key for E2E
-	router := &Router{
-		Mux:          mux,
-		AgentPrivKey: agentPriv,
-		DB:           nil,
-	}
-
-	// Test cleartext still works through HandleRequest
-	resp := router.HandleRequest(context.Background(), Request{
-		ID:     "clear-1",
-		Method: "GET",
-		Path:   "/api/storage/test/key1",
-	})
-
-	if resp.Status != 200 {
-		t.Fatalf("cleartext: expected 200, got %d", resp.Status)
-	}
-	if resp.Body == nil || *resp.Body != `{"value":"hello"}` {
-		t.Fatalf("cleartext: unexpected body: %v", resp.Body)
-	}
-}
-
-func TestRouter_EncryptedRequest_NoPrivKey(t *testing.T) {
+func TestRouter_EncryptedRejectedWithoutPrivKey(t *testing.T) {
 	mux := chi.NewRouter()
 	router := &Router{Mux: mux, AgentPrivKey: nil}
 
-	// Encrypted request without agent private key should fall through to cleartext
 	resp := router.HandleRequest(context.Background(), Request{
-		ID:        "enc-no-cache",
+		ID:        "enc-no-key",
 		Encrypted: true,
 		Payload:   "some-payload",
-		Method:    "GET",
-		Path:      "/health",
 	})
 
-	// Should be treated as cleartext since AgentPrivKey is nil
-	// The cleartext handler will try to route /health
-	_ = resp
-}
-
-func TestRouter_PostWithBody(t *testing.T) {
-	mux := chi.NewRouter()
-	mux.Put("/api/storage/mypage/counter", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(200)
-		w.Write([]byte(`{"ok":true}`))
-	})
-
-	router := &Router{Mux: mux}
-	body := base64.StdEncoding.EncodeToString([]byte(`42`))
-	resp := router.HandleRequest(context.Background(), Request{
-		ID:     "put-1",
-		Method: "PUT",
-		Path:   "/api/storage/mypage/counter",
-		Body:   &body,
-	})
-
-	if resp.Status != 200 {
-		t.Fatalf("expected 200, got %d", resp.Status)
+	if resp.Status != 400 {
+		t.Fatalf("encrypted without privkey should be rejected, got status %d", resp.Status)
 	}
 }
 

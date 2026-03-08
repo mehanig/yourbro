@@ -56,9 +56,9 @@ func (h *RelayHandler) Relay(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id is required"})
 		return
 	}
-	// Encrypted requests carry method/path inside the encrypted payload — only require id
-	if !req.Encrypted && (req.Method == "" || req.Path == "") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id, method, and path are required"})
+	// All relay requests must be E2E encrypted
+	if !req.Encrypted || req.KeyID == "" || req.Payload == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "encrypted relay required"})
 		return
 	}
 
