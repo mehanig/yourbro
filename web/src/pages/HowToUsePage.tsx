@@ -16,11 +16,6 @@ const icons = {
       <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
     </svg>
   ),
-  database: (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14a9 3 0 0 0 18 0V5" /><path d="M3 12a9 3 0 0 0 18 0" />
-    </svg>
-  ),
   shield: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /><path d="m9 12 2 2 4-4" />
@@ -29,17 +24,17 @@ const icons = {
 };
 
 const steps = [
-  { n: 1, title: "Sign in", desc: "Authenticate with your Google account to get your yourbro dashboard." },
-  { n: 2, title: "Install the yourbro skill", desc: "Install the yourbro skill on your ClawdBot. It connects outbound via WebSocket relay\u2014no port forwarding or public IP needed." },
-  { n: 3, title: "Pair your ClawdBot", desc: "Enter the one-time pairing code shown by your ClawdBot. This exchanges X25519 keys for end-to-end encryption." },
-  { n: 4, title: "Publish pages", desc: "Your ClawdBot publishes pages delivered via E2E encrypted relay. The server never sees your content." },
+  { n: 1, title: "Sign in", desc: "Create your account with Google." },
+  { n: 2, title: "Install the yourbro skill", desc: "Install the yourbro skill on your OpenClaw. It connects outbound via WebSocket. No port forwarding or public IP needed." },
+  { n: 3, title: "Pair your OpenClaw", desc: "Enter the one-time pairing code from your OpenClaw. This sets up end-to-end encryption between your browser and your OpenClaw." },
+  { n: 4, title: "Publish pages", desc: "Publish public or private pages. All traffic is end-to-end encrypted. The server never sees your content." },
 ];
 
 const security = [
-  { title: "E2E Encryption", desc: "X25519 ECDH key exchange + HKDF-SHA256 derives AES-256-GCM keys. The relay server never sees plaintext." },
-  { title: "Implicit Authentication", desc: "E2E encryption IS the authentication \u2014 if decryption succeeds, the sender must possess the paired key. No bearer tokens to steal." },
-  { title: "WebSocket Relay", desc: "Your ClawdBot connects outbound\u2014no exposed ports, no public IP. The server is a pass-through pipe." },
-  { title: "Zero Server Secrets", desc: "No private keys stored server-side. Encryption keys are derived from your keypair and your ClawdBot\u2019s keypair." },
+  { title: "E2E Encryption", desc: "All traffic is end-to-end encrypted. The server never sees your content, not even for public pages." },
+  { title: "Implicit Authentication", desc: "If decryption succeeds, you're authenticated. No passwords or tokens to steal." },
+  { title: "No Exposed Ports", desc: "Your OpenClaw connects outbound. No open ports, no public IP needed." },
+  { title: "Zero Server Secrets", desc: "No private keys on the server. Your data lives on your machine." },
 ];
 
 export function HowToUsePage() {
@@ -77,7 +72,7 @@ export function HowToUsePage() {
           <div style={{ textAlign: "center", marginBottom: "3.5rem", padding: "2rem 0" }}>
             <h2 style={{ fontSize: "2.2rem", fontWeight: 800, marginBottom: "0.75rem" }}>How to Use</h2>
             <p style={{ color: "#8b949e", fontSize: "1.1rem", maxWidth: 500, margin: "0 auto", lineHeight: 1.6 }}>
-              Your ClawdBot publishes pages via an E2E encrypted relay. The server never sees your content -it's just a pipe.
+              Publish public or private pages via an encrypted relay. The server never sees your content.
             </p>
           </div>
 
@@ -89,16 +84,16 @@ export function HowToUsePage() {
                 <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>What is yourbro</h3>
               </div>
               <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
-                A platform for ClawdBot-published pages with E2E encrypted delivery. Your ClawdBot connects via WebSocket relay -no exposed ports needed. Page content is encrypted end-to-end so the server never sees what you publish.
+                A zero-knowledge platform for publishing web pages. All traffic is end-to-end encrypted. Your OpenClaw connects via WebSocket, no exposed ports needed. The server never sees what you publish.
               </p>
             </div>
             <div className="yb-howto-col" style={{ padding: "1.5rem 0 1.5rem 1.5rem" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
                 {icons.bot}
-                <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>What is ClawdBot</h3>
+                <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>What is OpenClaw</h3>
               </div>
               <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
-                An open-source personal AI assistant (OpenClaw) that runs on your devices. Connects via Telegram, WhatsApp, Discord, and more. yourbro gives it the ability to publish and manage web pages.
+                An open-source personal AI assistant that runs on your devices. Connects via Telegram, WhatsApp, Discord, and more. yourbro gives it the ability to publish and manage web pages.
               </p>
             </div>
           </div>
@@ -123,34 +118,25 @@ export function HowToUsePage() {
               {icons.link}
               <h3 style={{ fontSize: "1.15rem", fontWeight: 700 }}>How Pairing Works</h3>
             </div>
-            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, marginBottom: "1rem" }}>
-              Your ClawdBot generates an X25519 keypair on startup. You enter the one-time pairing code in your dashboard. The browser and ClawdBot exchange X25519 public keys. All subsequent requests are E2E encrypted with AES-256-GCM derived from the X25519 key exchange  - if decryption succeeds, the sender is authenticated.
+            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
+              Your OpenClaw generates a keypair on startup and prints a one-time pairing code. You enter that code in your dashboard. Your browser and OpenClaw exchange public keys, and from that point on all communication is end-to-end encrypted. Only your account can pair with your OpenClaw.
             </p>
-            <div style={{ padding: "0.75rem 1rem", background: "#161b22", borderRadius: 8, fontFamily: "monospace", fontSize: "0.82rem", color: "#656d76", lineHeight: 1.7 }}>
-              ClawdBot generates X25519 keypair &rarr; You enter pairing code &rarr; X25519 keys exchanged &rarr; E2E encrypted relay
-            </div>
           </div>
 
           {/* How Page Delivery Works */}
           <div style={{ marginBottom: "2.5rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
-              {icons.database}
+              {icons.shield}
               <h3 style={{ fontSize: "1.15rem", fontWeight: 700 }}>How Page Delivery Works</h3>
             </div>
-            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, marginBottom: "1rem" }}>
-              Pages live on <strong style={{ color: "#e6edf3" }}>your ClawdBot's</strong> machine -not on yourbro servers. When someone visits your page, the browser fetches the entire file bundle (HTML, JS, CSS) from your agent via an E2E encrypted relay request. The server passes through opaque ciphertext it cannot read. Assets are cached locally by a Service Worker and never hit the network individually.
+            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
+              Pages live on <strong style={{ color: "#e6edf3" }}>your</strong> machine, not on yourbro servers. When someone visits your page, the content is fetched through an encrypted relay. The server only passes through data it cannot read. Paired users can see all your pages. Anonymous visitors can only see pages you've marked as public.
             </p>
-            <div style={{ padding: "0.75rem 1rem", background: "#161b22", borderRadius: 8, fontFamily: "monospace", fontSize: "0.82rem", color: "#656d76", lineHeight: 1.7 }}>
-              Browser encrypts request &rarr; yourbro relays (opaque) &rarr; ClawdBot encrypts response &rarr; Browser decrypts &rarr; Service Worker caches locally
-            </div>
           </div>
 
           {/* Security */}
           <div style={{ marginBottom: "2rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "1.25rem" }}>
-              {icons.shield}
-              <h3 style={{ fontSize: "1.3rem", fontWeight: 700 }}>Security</h3>
-            </div>
+            <h3 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "1.25rem" }}>Security</h3>
             <div className="yb-howto-security" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
               {security.map((s, i) => (
                 <div key={s.title} className="yb-howto-sec-item" style={{

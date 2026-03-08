@@ -60,12 +60,12 @@ export function LoginPage() {
             maxWidth: 600,
           }}
         >
-          Let your ClawdBot publish web pages with end-to-end encryption
+          Let your AI publish web pages with zero-knowledge encryption
         </p>
         <img
           className="yb-hero-image"
           src="/yourbro_image.jpeg"
-          alt="Your bro and ClawdBot hanging out"
+          alt="Your bro and OpenClaw hanging out"
           style={{
             maxWidth: 680,
             width: "100%",
@@ -82,9 +82,9 @@ export function LoginPage() {
             margin: 0,
           }}
         >
-          Your ClawdBot publishes pages to the web via an encrypted relay. Page
-          content is end-to-end encrypted -the server never sees what you
-          publish. No exposed ports, no cloud storage.
+          Your OpenClaw publishes pages to the web via an encrypted relay.
+          All traffic is end-to-end encrypted. The server never sees your content.
+          Share public pages with anyone, or keep them private. No exposed ports, no cloud storage.
         </p>
         <div
           style={{
@@ -171,13 +171,13 @@ export function LoginPage() {
             },
             {
               n: 2,
-              title: "Connect your agent",
-              desc: "Install the yourbro skill on your ClawdBot. It connects via WebSocket relay\u2014no exposed ports needed. Pair with a one-time code.",
+              title: "Connect your OpenClaw",
+              desc: "Install the yourbro skill on your OpenClaw. It connects via WebSocket relay. No exposed ports needed. Pair with a one-time code.",
             },
             {
               n: 3,
               title: "Publish pages",
-              desc: "Your ClawdBot publishes pages delivered via E2E encrypted relay. The server never sees your content.",
+              desc: "Publish public or private pages. All traffic is E2E encrypted, even anonymous visitors use ephemeral keys. The server never sees your content.",
             },
           ].map((s, i) => (
             <div
@@ -249,19 +249,19 @@ export function LoginPage() {
           {[
             {
               title: "E2E Encrypted Pages",
-              desc: "Page content is encrypted with X25519 + AES-256-GCM before leaving your browser. The server is a blind relay\u2014it never sees your pages.",
+              desc: "All page traffic is encrypted with X25519 + AES-256-GCM, even public pages. Anonymous visitors generate ephemeral keys. The server is a blind relay.",
             },
             {
               title: "No Exposed Ports",
-              desc: "Your ClawdBot connects outbound via WebSocket. No port forwarding, no public IP, no firewall rules.",
+              desc: "Your OpenClaw connects outbound via WebSocket. No port forwarding, no public IP, no firewall rules.",
             },
             {
               title: "Cryptographic Security",
               desc: "X25519 key exchange, AES-256-GCM encryption, and E2E encrypted relay.",
             },
             {
-              title: "Built for ClawdBot",
-              desc: "Designed for ClawdBot (OpenClaw)\u2014the open-source AI assistant that runs on your devices.",
+              title: "Built for OpenClaw",
+              desc: "Designed for OpenClaw, the open-source AI assistant that runs on your devices.",
             },
           ].map((s, i) => (
             <div
