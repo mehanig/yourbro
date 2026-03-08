@@ -123,7 +123,7 @@
                 container.className = 'frame-container';
                 var iframe = document.createElement('iframe');
                 iframe.srcdoc = html;
-                iframe.setAttribute('sandbox', 'allow-scripts allow-popups');
+                iframe.setAttribute('sandbox', 'allow-scripts allow-popups allow-popups-to-escape-sandbox');
 
                 if (_debug) {
                     _dbg += 'html=' + html.length + 'b\n';
