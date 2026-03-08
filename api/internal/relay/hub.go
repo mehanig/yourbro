@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log"
@@ -40,6 +41,11 @@ func NewHub(db *storage.DB, notify func(userID int64)) *Hub {
 		DB:     db,
 		Notify: notify,
 	}
+}
+
+// GetAgentByUUID delegates to the database.
+func (h *Hub) GetAgentByUUID(ctx context.Context, uuid string) (*models.Agent, error) {
+	return h.DB.GetAgentByUUID(ctx, uuid)
 }
 
 // IsOnline checks if an agent is connected via WebSocket.
@@ -83,6 +89,15 @@ func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request, userID int64
 		// UUID matched, same owner, name changed — update name
 		h.DB.UpdateAgentName(r.Context(), agentUUID, agentName)
 		agent.Name = agentName
+	}
+
+	// Store agent's X25519 public key if provided
+	if x25519B64 := r.URL.Query().Get("x25519_pub"); x25519B64 != "" {
+		if pubKey, err := base64.RawURLEncoding.DecodeString(x25519B64); err == nil && len(pubKey) == 32 {
+			if err := h.DB.UpdateAgentX25519PubKey(r.Context(), agent.DBId, pubKey); err != nil {
+				log.Printf("Failed to store X25519 pubkey for agent %s: %v", agent.ID, err)
+			}
+		}
 	}
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{

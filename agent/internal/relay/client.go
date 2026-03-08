@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"log"
 	"math/rand"
@@ -45,11 +46,12 @@ type Response struct {
 
 // Client manages the WebSocket connection to the yourbro server.
 type Client struct {
-	ServerURL  string // wss://yourbro.ai or https://yourbro.ai
-	APIToken   string
-	AgentName  string
-	AgentUUID  string
-	Handler    func(ctx context.Context, req Request) Response
+	ServerURL     string // wss://yourbro.ai or https://yourbro.ai
+	APIToken      string
+	AgentName     string
+	AgentUUID     string
+	X25519PubKey  []byte // agent's X25519 public key (raw 32 bytes)
+	Handler       func(ctx context.Context, req Request) Response
 }
 
 // Run connects to the server and processes relay messages. It reconnects
@@ -98,6 +100,9 @@ func (c *Client) connect(ctx context.Context) error {
 	wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
 	wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
 	wsURL += "/ws/agent?name=" + c.AgentName + "&uuid=" + c.AgentUUID
+	if len(c.X25519PubKey) > 0 {
+		wsURL += "&x25519_pub=" + base64.RawURLEncoding.EncodeToString(c.X25519PubKey)
+	}
 
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

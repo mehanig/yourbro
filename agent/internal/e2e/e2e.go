@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
-	"sync"
 
 	"golang.org/x/crypto/hkdf"
 )
@@ -67,39 +66,3 @@ func (c *Cipher) Decrypt(data []byte) ([]byte, error) {
 	return c.aead.Open(nil, nonce, ciphertext, nil)
 }
 
-// CipherCache caches Cipher instances per user public key (base64).
-type CipherCache struct {
-	mu      sync.RWMutex
-	ciphers map[string]*Cipher
-	agentPriv *ecdh.PrivateKey
-}
-
-// NewCipherCache creates a cache of ciphers keyed by user X25519 public key.
-func NewCipherCache(agentPriv *ecdh.PrivateKey) *CipherCache {
-	return &CipherCache{
-		ciphers:   make(map[string]*Cipher),
-		agentPriv: agentPriv,
-	}
-}
-
-// Get returns or creates a Cipher for the given user X25519 public key.
-func (cc *CipherCache) Get(userX25519Pub *ecdh.PublicKey) (*Cipher, error) {
-	key := string(userX25519Pub.Bytes())
-
-	cc.mu.RLock()
-	c, ok := cc.ciphers[key]
-	cc.mu.RUnlock()
-	if ok {
-		return c, nil
-	}
-
-	c, err := NewCipher(cc.agentPriv, userX25519Pub)
-	if err != nil {
-		return nil, err
-	}
-
-	cc.mu.Lock()
-	cc.ciphers[key] = c
-	cc.mu.Unlock()
-	return c, nil
-}

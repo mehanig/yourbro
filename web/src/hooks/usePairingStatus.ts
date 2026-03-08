@@ -1,10 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { API_BASE, deleteAgent, type Agent } from "../lib/api";
+import { deleteAgent, type Agent } from "../lib/api";
 import {
   getOrCreateX25519Keypair,
   storeAgentX25519Key,
   loadAgentX25519Key,
-  base64RawUrlEncode,
   base64RawUrlDecode,
 } from "../lib/crypto";
 import { deriveE2EKey, encryptedRelay, x25519KeyId } from "../lib/e2e";
@@ -83,40 +82,32 @@ export function usePairingStatus(agents: Agent[]) {
       username: string
     ): Promise<{ ok: boolean; error?: string }> => {
       try {
-        const x25519kp = await getOrCreateX25519Keypair();
-        const x25519PubB64 = base64RawUrlEncode(x25519kp.publicKeyBytes);
+        // Find agent's X25519 public key from the agent list
+        const agent = agents.find((a) => a.id === agentId);
+        if (!agent?.x25519_public) {
+          return { ok: false, error: "Agent encryption key not available. Try again." };
+        }
+        const agentPubBytes = base64RawUrlDecode(agent.x25519_public);
+        await storeAgentX25519Key(agentId, agentPubBytes);
 
-        const res = await fetch(`${API_BASE}/api/relay/${agentId}`, {
+        const x25519kp = await getOrCreateX25519Keypair();
+        const aesKey = await deriveE2EKey(x25519kp.privateKey, agentPubBytes);
+        const userKeyID = x25519KeyId(x25519kp.publicKeyBytes);
+
+        const resp = await encryptedRelay(agentId, aesKey, userKeyID, {
           method: "POST",
+          path: "/api/pair",
           headers: { "Content-Type": "application/json" },
-          credentials: "include",
           body: JSON.stringify({
-            id: crypto.randomUUID(),
-            method: "POST",
-            path: "/api/pair",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              pairing_code: code,
-              user_x25519_public_key: x25519PubB64,
-              username,
-            }),
+            pairing_code: code,
+            user_x25519_public_key: userKeyID,
+            username,
           }),
         });
 
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({ error: res.statusText }));
-          return { ok: false, error: data.error || res.statusText };
-        }
-
-        const relayResp = await res.json();
-        const pairResp = relayResp.body
-          ? JSON.parse(relayResp.body)
-          : relayResp;
-        if (pairResp.agent_x25519_public_key) {
-          const agentX25519Bytes = base64RawUrlDecode(
-            pairResp.agent_x25519_public_key
-          );
-          await storeAgentX25519Key(agentId, agentX25519Bytes);
+        if (!resp || resp.status < 200 || resp.status >= 300) {
+          const error = resp?.body ? JSON.parse(resp.body).error : "Pairing failed";
+          return { ok: false, error };
         }
 
         setStatusMap((prev) => new Map(prev).set(agentId, "paired"));
@@ -128,7 +119,7 @@ export function usePairingStatus(agents: Agent[]) {
         };
       }
     },
-    []
+    [agents]
   );
 
   const removeAgent = useCallback(

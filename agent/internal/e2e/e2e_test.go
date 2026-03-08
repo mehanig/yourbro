@@ -122,38 +122,3 @@ func TestCipher_WrongKey(t *testing.T) {
 	}
 }
 
-func TestCipherCache_ReturnsSameCipher(t *testing.T) {
-	agentPriv, _ := ecdh.X25519().GenerateKey(rand.Reader)
-	cache := NewCipherCache(agentPriv)
-
-	userPriv, _ := ecdh.X25519().GenerateKey(rand.Reader)
-
-	c1, err := cache.Get(userPriv.PublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	c2, err := cache.Get(userPriv.PublicKey())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if c1 != c2 {
-		t.Fatal("cache should return the same cipher instance")
-	}
-}
-
-func TestCipherCache_DifferentUsersGetDifferentCiphers(t *testing.T) {
-	agentPriv, _ := ecdh.X25519().GenerateKey(rand.Reader)
-	cache := NewCipherCache(agentPriv)
-
-	user1, _ := ecdh.X25519().GenerateKey(rand.Reader)
-	user2, _ := ecdh.X25519().GenerateKey(rand.Reader)
-
-	c1, _ := cache.Get(user1.PublicKey())
-	c2, _ := cache.Get(user2.PublicKey())
-
-	if c1 == c2 {
-		t.Fatal("different users should get different cipher instances")
-	}
-}

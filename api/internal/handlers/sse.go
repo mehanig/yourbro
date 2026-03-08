@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -80,14 +81,23 @@ func (b *SSEBroker) sendAgents(userID int64) {
 		agents = []models.Agent{}
 	}
 
-	// Enrich with online status from Hub
-	if b.Hub != nil {
-		for i := range agents {
-			agents[i].IsOnline = b.Hub.IsOnline(agents[i].ID)
+	// Build response with online status and X25519 public keys
+	type agentResp struct {
+		models.Agent
+		X25519Public string `json:"x25519_public,omitempty"`
+	}
+	resp := make([]agentResp, len(agents))
+	for i, a := range agents {
+		if b.Hub != nil {
+			a.IsOnline = b.Hub.IsOnline(a.ID)
+		}
+		resp[i] = agentResp{Agent: a}
+		if len(a.X25519PubKey) > 0 {
+			resp[i].X25519Public = base64.RawURLEncoding.EncodeToString(a.X25519PubKey)
 		}
 	}
 
-	data, err := json.Marshal(agents)
+	data, err := json.Marshal(resp)
 	if err != nil {
 		return
 	}

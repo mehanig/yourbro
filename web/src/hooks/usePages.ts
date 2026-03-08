@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import {
-  listPagesViaRelay,
   getPageAnalytics,
   type Page,
   type PageAnalytics,
@@ -47,10 +46,25 @@ export function usePages(
     setLoading(true);
     Promise.all([
       Promise.all(
-        pairedOnline.map(async (agent) => ({
-          agent,
-          pages: await listPagesViaRelay(agent.id),
-        }))
+        pairedOnline.map(async (agent) => {
+          try {
+            const agentPubBytes = await loadAgentX25519Key(agent.id);
+            if (!agentPubBytes) return { agent, pages: [] as Page[] };
+            const x25519kp = await getOrCreateX25519Keypair();
+            const aesKey = await deriveE2EKey(x25519kp.privateKey, agentPubBytes);
+            const userKeyID = x25519KeyId(x25519kp.publicKeyBytes);
+            const resp = await encryptedRelay(agent.id, aesKey, userKeyID, {
+              method: "GET",
+              path: "/api/pages",
+            });
+            if (resp && resp.status === 200 && resp.body) {
+              return { agent, pages: JSON.parse(resp.body) as Page[] };
+            }
+            return { agent, pages: [] as Page[] };
+          } catch {
+            return { agent, pages: [] as Page[] };
+          }
+        })
       ),
       getPageAnalytics().catch(() => [] as PageAnalytics[]),
     ]).then(([results, a]) => {
