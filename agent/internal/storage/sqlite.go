@@ -71,6 +71,9 @@ func NewDB(path string) (*DB, error) {
 	// Drop legacy pages table — pages are now directory-based on the filesystem
 	db.Exec(`DROP TABLE IF EXISTS pages`)
 
+	// Add uuid column if missing (for agents created before UUID support)
+	db.Exec(`ALTER TABLE agent_identity ADD COLUMN uuid TEXT NOT NULL DEFAULT ''`)
+
 	d := &DB{db: db, authKeys: make(map[string]string)}
 	if err := d.reloadAuthKeys(); err != nil {
 		return nil, fmt.Errorf("load authorized keys: %w", err)

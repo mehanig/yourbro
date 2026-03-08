@@ -32,12 +32,13 @@ type PublicKey struct {
 }
 
 type Agent struct {
-	ID       string    `json:"id"`        // UUID string — primary public identifier
-	DBId     int64     `json:"-"`         // internal BIGSERIAL, never exposed via API
-	UserID   int64     `json:"user_id,omitempty"`
-	Name     string    `json:"name"`
-	PairedAt time.Time `json:"paired_at"`
-	IsOnline bool      `json:"is_online"`
+	ID            string    `json:"id"`        // UUID string — primary public identifier
+	DBId          int64     `json:"-"`         // internal BIGSERIAL, never exposed via API
+	UserID        int64     `json:"user_id,omitempty"`
+	Name          string    `json:"name"`
+	PairedAt      time.Time `json:"paired_at"`
+	IsOnline      bool      `json:"is_online"`
+	X25519PubKey  []byte    `json:"-"`         // agent's X25519 public key for E2E encryption
 }
 
 // API request/response types

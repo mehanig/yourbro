@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -127,9 +128,6 @@ func main() {
 	sseBroker.Hub = relayHub
 	agentsHandler := &handlers.AgentsHandler{DB: db, Broker: sseBroker, Hub: relayHub}
 	relayHandler := &handlers.RelayHandler{Hub: relayHub}
-	pagesHandler := &handlers.PagesHandler{
-		DB: db,
-	}
 	viewRecorder := analytics.New(db, 256, 4)
 
 	r := chi.NewRouter()
@@ -242,77 +240,107 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Public page relay — no auth required.
-	// Agent decides whether to serve based on page.json "public" flag.
+	// Public page endpoints — E2E encrypted, no auth required.
+	// GET: discovery — returns agent UUID + X25519 pubkey (no content, no relay)
+	// POST: blind encrypted relay by agent UUID
 	var validSlugRe = regexp.MustCompile(`^[a-z0-9-]+$`)
+
+	writeNotFound := func(w http.ResponseWriter) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"not found"}`))
+	}
+
 	r.Get("/api/public-page/{username}/{slug}", func(w http.ResponseWriter, r *http.Request) {
 		username := chi.URLParam(r, "username")
 		slug := chi.URLParam(r, "slug")
-
-		// Validate slug at API level (defense in depth)
 		if !validSlugRe.MatchString(slug) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(`{"error":"not found"}`))
+			writeNotFound(w)
 			return
-		}
-
-		// Uniform 404 for all error cases — don't leak user/agent/page existence
-		notFound := func() {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(`{"error":"not found"}`))
 		}
 
 		user, err := db.GetUserByUsername(r.Context(), username)
 		if err != nil {
-			notFound()
+			writeNotFound(w)
 			return
 		}
 
 		agents, err := db.ListAgents(r.Context(), user.ID)
 		if err != nil || len(agents) == 0 {
-			notFound()
+			writeNotFound(w)
+			return
+		}
+
+		// Find first online agent with X25519 pubkey
+		for _, agent := range agents {
+			if !relayHub.IsOnline(agent.ID) {
+				continue
+			}
+			if agent.X25519PubKey == nil {
+				continue
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "public, s-maxage=300")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"agent_uuid":    agent.ID,
+				"x25519_public": base64.StdEncoding.EncodeToString(agent.X25519PubKey),
+			})
+			return
+		}
+		writeNotFound(w)
+	})
+
+	r.Post("/api/public-page/{agent_uuid}/{slug}", func(w http.ResponseWriter, r *http.Request) {
+		agentUUID := chi.URLParam(r, "agent_uuid")
+		slug := chi.URLParam(r, "slug")
+		if !validSlugRe.MatchString(slug) {
+			writeNotFound(w)
+			return
+		}
+
+		var body struct {
+			ID        string `json:"id"`
+			Encrypted bool   `json:"encrypted"`
+			KeyID     string `json:"key_id"`
+			Payload   string `json:"payload"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeNotFound(w)
+			return
+		}
+		if !body.Encrypted || body.KeyID == "" || body.Payload == "" {
+			writeNotFound(w)
+			return
+		}
+
+		agent, err := db.GetAgentByUUID(r.Context(), agentUUID)
+		if err != nil || !relayHub.IsOnline(agent.ID) {
+			writeNotFound(w)
 			return
 		}
 
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
-		// Try each online agent until one serves the public page
-		for _, agent := range agents {
-			if !relayHub.IsOnline(agent.ID) {
-				continue
-			}
-			reqID, _ := auth.GenerateRandomHex(16)
-			req := models.RelayRequest{
-				ID:     reqID,
-				Method: "GET",
-				Path:   "/api/public-page/" + slug,
-			}
-			resp, err := relayHub.SendRequest(ctx, agent.ID, req)
-			if err != nil {
-				continue
-			}
-			if resp.Status == 200 && resp.Body != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("Cache-Control", "public, s-maxage=60")
-				w.WriteHeader(200)
-				w.Write([]byte(*resp.Body))
-
-				// Record analytics (async, non-blocking)
-				viewRecorder.Record(analytics.PageView{
-					UserID:    user.ID,
-					Slug:      slug,
-					IP:        r.RemoteAddr,
-					Referrer:  r.Header.Get("X-Referrer"),
-					UserAgent: r.UserAgent(),
-				})
-				return
-			}
+		reqID, _ := auth.GenerateRandomHex(16)
+		resp, err := relayHub.SendRequest(ctx, agent.ID, models.RelayRequest{
+			ID: reqID, Encrypted: true, KeyID: body.KeyID, Payload: body.Payload,
+		})
+		if err != nil {
+			writeNotFound(w)
+			return
 		}
 
-		notFound()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+
+		viewRecorder.Record(analytics.PageView{
+			UserID:    agent.UserID,
+			Slug:      slug,
+			IP:        r.RemoteAddr,
+			Referrer:  r.Header.Get("X-Referrer"),
+			UserAgent: r.UserAgent(),
+		})
 	})
 
 	// WebSocket endpoint for relay-mode agents (agent auth via Bearer token)
@@ -351,18 +379,6 @@ func main() {
 	// Authenticated API routes
 	r.Route("/api", func(r chi.Router) {
 		r.Use(middleware.RequireAuth(db))
-
-		// Short-lived content token for sandboxed iframes (can't send httpOnly cookies)
-		r.Get("/content-token", func(w http.ResponseWriter, r *http.Request) {
-			userID := middleware.GetUserID(r)
-			token, err := auth.CreateSessionToken(userID)
-			if err != nil {
-				http.Error(w, `{"error":"failed to create token"}`, http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"token": token})
-		})
 
 		// User info
 		r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
@@ -510,9 +526,6 @@ func main() {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(result)
 		})
-
-		// Page agents — returns agent IDs for a username (used by static page shell)
-		r.Get("/page-agents/{username}", pagesHandler.PageAgents)
 
 		// Agents
 		r.Route("/agents", func(r chi.Router) {

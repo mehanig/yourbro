@@ -11,6 +11,8 @@ import (
 	"net/http/httptest"
 	"strings"
 
+	"crypto/ecdh"
+
 	"github.com/mehanig/yourbro/agent/internal/e2e"
 	"github.com/mehanig/yourbro/agent/internal/storage"
 )
@@ -107,13 +109,21 @@ func (r *Router) getUserCipher(keyID string) (*e2e.Cipher, error) {
 	if keyID != "" {
 		keyBytes, err := base64.RawURLEncoding.DecodeString(keyID)
 		if err == nil && len(keyBytes) == 32 {
+			// 1. Try paired user lookup (authorized_keys)
 			pub, err := r.DB.GetX25519KeyByPublicBytes(keyBytes)
 			if err == nil {
 				return r.CipherCache.Get(pub)
 			}
+
+			// 2. Accept anonymous key directly (for public page viewers)
+			curve := ecdh.X25519()
+			anonPub, err := curve.NewPublicKey(keyBytes)
+			if err != nil {
+				return nil, fmt.Errorf("invalid X25519 public key")
+			}
+			return r.CipherCache.Get(anonPub)
 		}
-		log.Printf("E2E: key_id lookup failed, key not found")
-		return nil, fmt.Errorf("unknown key_id")
+		return nil, fmt.Errorf("invalid key_id encoding")
 	}
 
 	// Fallback: single-user mode (no key_id provided)

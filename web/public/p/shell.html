@@ -21,7 +21,8 @@
 <body>
     <script>
         (async function() {
-            var API = 'https://api.yourbro.ai';
+            var API = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+                ? '' : 'https://api.yourbro.ai';
 
             // Parse username and slug from /p/{username}/{slug}
             var parts = window.location.pathname.split('/').filter(Boolean);
@@ -135,13 +136,10 @@
                   try {
                     _dbg += 'path=BLOB files=' + Object.keys(pageData.files).length + '\n';
                     // No-SW fallback: blob URLs + fetch/XHR override
-                    // Strategy: create blob URLs for all files, rewrite only HTML
-                    // src/href attributes (via DOM parsing), inject fetch/XHR
-                    // override for dynamic JS requests. Never modify JS/CSS source.
                     var files = pageData.files;
                     var blobMap = {};
 
-                    // Create blob URLs for all non-HTML files (no source rewriting)
+                    // Create blob URLs for all non-HTML files
                     for (var name in files) {
                         if (name === 'index.html') continue;
                         var content = files[name];
@@ -155,7 +153,7 @@
                         }
                     }
 
-                    // Parse HTML and rewrite only src/href attributes (precise, no string mangling)
+                    // Parse HTML and rewrite only src/href attributes
                     var dp = new DOMParser();
                     var doc = dp.parseFromString(files['index.html'], 'text/html');
 
@@ -174,16 +172,13 @@
                     overrideEl.textContent = '(function(){' +
                         'var m=' + JSON.stringify(blobMap) + ';' +
                         'function r(u){return u.replace(/^\\.\\//,"");}' +
-                        // Override fetch
                         'var F=window.fetch;window.fetch=function(u,o){' +
                         'var k=r(typeof u==="string"?u:u.url);' +
                         'if(m[k])return F(m[k],o);return F.apply(this,arguments)};' +
-                        // Override XHR
                         'var X=XMLHttpRequest.prototype.open;' +
                         'XMLHttpRequest.prototype.open=function(){' +
                         'var u=arguments[1];if(typeof u==="string"){var k=r(u);if(m[k])arguments[1]=m[k]}' +
                         'return X.apply(this,arguments)};' +
-                        // Override dynamic src/href sets on DOM elements
                         '["src","href"].forEach(function(a){' +
                         '["HTMLImageElement","HTMLScriptElement","HTMLLinkElement","HTMLSourceElement","HTMLMediaElement"].forEach(function(t){' +
                         'var P=window[t]&&window[t].prototype;if(!P)return;' +
@@ -221,87 +216,14 @@
             }
 
             // ==========================================
-            // 1. Always try public endpoint first (fast, one GET)
+            // Unified E2E encrypted flow for all pages
             // ==========================================
-            var pageData = null;
-            var isPublic = false;
-            var debugInfo = '';
 
-            try {
-                var publicUrl = API + '/api/public-page/' +
-                    encodeURIComponent(username) + '/' + encodeURIComponent(slug);
-                debugInfo += 'fetch: ' + publicUrl + '\n';
-                var publicResp = await fetch(publicUrl, {
-                    headers: { 'X-Referrer': document.referrer || '' }
-                });
-                debugInfo += 'status: ' + publicResp.status + '\n';
-                if (publicResp.ok) {
-                    pageData = await publicResp.json();
-                    isPublic = true;
-                }
-            } catch(e) {
-                debugInfo += 'error: ' + e.message + '\n';
-                console.error('Public page fetch failed:', e);
-            }
-
-            // If public worked, render and exit
-            if (isPublic && pageData && pageData.files && pageData.files['index.html']) {
-                var iframe = await renderPage(pageData);
-
-                // Storage bridge: respond with error for public pages (no E2E keys)
-                window.addEventListener('message', function(event) {
-                    if (!event.data || event.data.type !== 'yourbro-storage') return;
-                    if (event.source !== iframe.contentWindow) return;
-                    iframe.contentWindow.postMessage({
-                        type: 'yourbro-storage-response',
-                        action: event.data.action,
-                        requestId: event.data.requestId,
-                        ok: false,
-                        error: 'Storage is not available for public pages'
-                    }, '*');
-                });
-
-                return;
-            }
-
-            // ==========================================
-            // 2. Not public — try E2E encrypted path (requires login)
-            // ==========================================
-            var hasSession = localStorage.getItem('yb_logged_in') === '1';
-            if (!hasSession) {
-                document.body.innerHTML = '<div class="status-msg">' +
-                    'This page is not available.' +
-                    '<div class="subtitle">It may be private or the author\'s agent may be offline.</div>' +
-                    (_debug ? '<pre style="font-size:11px;color:#555;margin-top:12px;text-align:left;max-width:400px;word-break:break-all">' + debugInfo + 'ua: ' + navigator.userAgent.substring(0,80) + '</pre>' : '') +
-                    '<a href="/">Sign in</a></div>';
-                return;
-            }
-
-            // 2a. Verify auth
-            var authResp = await fetch(API + '/api/content-token', { credentials: 'include' });
-            if (!authResp.ok) {
-                document.body.innerHTML = '<div class="status-msg">Sign in to view this page. <a href="/">Go to login</a></div>';
-                return;
-            }
-
-            // 2b. Get agent IDs from API
-            var agentsResp = await fetch(API + '/api/page-agents/' + encodeURIComponent(username), { credentials: 'include' });
-            if (!agentsResp.ok) {
-                document.body.innerHTML = '<div class="status-msg">User not found. <a href="/">Go home</a></div>';
-                return;
-            }
-            var agentIds = (await agentsResp.json()).agent_ids;
-            if (!agentIds || agentIds.length === 0) {
-                document.body.innerHTML = '<div class="status-msg">No agents registered. <a href="/">Go home</a></div>';
-                return;
-            }
-
-            // 2c. Load E2E keys from IndexedDB (stored by dashboard pairing flow)
+            // 1. Generate or load X25519 key pair from IndexedDB
             var x25519Private = null; // CryptoKey
             var x25519PubBytes = null; // Uint8Array
-            var agentX25519Keys = {};
             try {
-                var db = await new Promise(function(res, rej) {
+                var idb = await new Promise(function(res, rej) {
                     var req = indexedDB.open('clawd-keys', 3);
                     req.onupgradeneeded = function() {
                         var d = req.result;
@@ -313,69 +235,93 @@
                     req.onerror = function() { rej(req.error); };
                 });
                 var stored = await new Promise(function(res, rej) {
-                    var tx = db.transaction('x25519', 'readonly');
+                    var tx = idb.transaction('x25519', 'readonly');
                     var req = tx.objectStore('x25519').get('default');
                     req.onsuccess = function() { res(req.result || null); };
                     req.onerror = function() { rej(req.error); };
                 });
                 if (stored && stored.pk && stored.pub) {
-                    x25519Private = await crypto.subtle.importKey('pkcs8', stored.pk.buffer, 'X25519', false, ['deriveBits']);
-                    x25519PubBytes = stored.pub;
+                    x25519Private = await crypto.subtle.importKey('pkcs8', stored.pk.buffer || stored.pk, 'X25519', false, ['deriveBits']);
+                    x25519PubBytes = new Uint8Array(stored.pub);
+                } else {
+                    // Generate new X25519 key pair for anonymous viewer
+                    var kp = await crypto.subtle.generateKey('X25519', true, ['deriveBits']);
+                    var privExport = await crypto.subtle.exportKey('pkcs8', kp.privateKey);
+                    var pubExport = await crypto.subtle.exportKey('raw', kp.publicKey);
+                    x25519Private = kp.privateKey;
+                    x25519PubBytes = new Uint8Array(pubExport);
+                    // Store in IndexedDB for reuse
+                    await new Promise(function(res, rej) {
+                        var tx = idb.transaction('x25519', 'readwrite');
+                        tx.objectStore('x25519').put({ pk: new Uint8Array(privExport), pub: x25519PubBytes }, 'default');
+                        tx.oncomplete = function() { res(); };
+                        tx.onerror = function() { rej(tx.error); };
+                    });
                 }
-                for (var i = 0; i < agentIds.length; i++) {
-                    try {
-                        var k = await new Promise(function(res, rej) {
-                            var tx = db.transaction('agent-keys', 'readonly');
-                            var req = tx.objectStore('agent-keys').get('x25519-' + agentIds[i]);
-                            req.onsuccess = function() { res(req.result || null); };
-                            req.onerror = function() { rej(req.error); };
-                        });
-                        if (k) agentX25519Keys[agentIds[i]] = k;
-                    } catch(e) {}
-                }
-            } catch(e) { /* IndexedDB not available */ }
-
-            // 2d. Derive E2E encryption key
-            var e2eAgentId = null;
-            var aesKey = null;
-            if (x25519Private) {
-                for (var i = 0; i < agentIds.length; i++) {
-                    if (agentX25519Keys[agentIds[i]]) {
-                        try {
-                            var agentPub = await crypto.subtle.importKey(
-                                'raw', agentX25519Keys[agentIds[i]], 'X25519', true, []
-                            );
-                            var shared = await crypto.subtle.deriveBits(
-                                { name: 'X25519', public: agentPub }, x25519Private, 256
-                            );
-                            var hkdfKey = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
-                            aesKey = await crypto.subtle.deriveKey(
-                                { name: 'HKDF', hash: 'SHA-256', salt: new ArrayBuffer(0), info: new TextEncoder().encode('yourbro-e2e-v1') },
-                                hkdfKey,
-                                { name: 'AES-GCM', length: 256 },
-                                false,
-                                ['encrypt', 'decrypt']
-                            );
-                            e2eAgentId = agentIds[i];
-                            break;
-                        } catch(e) {
-                            console.warn('E2E key derivation failed for agent', agentIds[i], e);
-                        }
-                    }
-                }
-            }
-
-            if (!aesKey) {
-                document.body.innerHTML = '<div class="status-msg">Encryption keys missing.<div class="subtitle">Re-pair your agent to enable E2E encryption.</div><a href="/#/dashboard">Go to dashboard</a></div>';
+            } catch(e) {
+                console.error('Key generation failed:', e);
+                document.body.innerHTML = '<div class="status-msg">Failed to initialize encryption keys.<div class="subtitle">' + e.message + '</div></div>';
                 return;
             }
 
-            // User's X25519 public key as base64url
+            // User's X25519 public key as base64url (key_id for the relay)
             var userKeyId = '';
             if (x25519PubBytes) {
                 var s = '';
                 for (var i = 0; i < x25519PubBytes.length; i++) s += String.fromCharCode(x25519PubBytes[i]);
                 userKeyId = btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            }
+
+            // 2. GET discovery — returns { agent_uuid, x25519_public }
+            var agentUUID = null;
+            var agentPubBytes = null;
+            try {
+                var discoveryUrl = API + '/api/public-page/' +
+                    encodeURIComponent(username) + '/' + encodeURIComponent(slug);
+                _dbg += 'discovery: ' + discoveryUrl + '\n';
+                var discoveryResp = await fetch(discoveryUrl);
+                _dbg += 'discovery status: ' + discoveryResp.status + '\n';
+                if (discoveryResp.ok) {
+                    var discovery = await discoveryResp.json();
+                    agentUUID = discovery.agent_uuid;
+                    // Decode base64 agent pubkey
+                    var b64 = discovery.x25519_public;
+                    var raw = atob(b64);
+                    agentPubBytes = new Uint8Array(raw.length);
+                    for (var i = 0; i < raw.length; i++) agentPubBytes[i] = raw.charCodeAt(i);
+                }
+            } catch(e) {
+                _dbg += 'discovery error: ' + e.message + '\n';
+            }
+
+            if (!agentUUID || !agentPubBytes) {
+                document.body.innerHTML = '<div class="status-msg">' +
+                    'This page is not available.' +
+                    '<div class="subtitle">The author\'s agent may be offline or the page doesn\'t exist.</div>' +
+                    (_debug ? '<pre style="font-size:11px;color:#555;margin-top:12px;text-align:left;max-width:400px;word-break:break-all">' + _dbg + '</pre>' : '') +
+                    '</div>';
+                return;
+            }
+
+            // 3. Derive AES key: ECDH(viewer_priv, agent_pub) + HKDF
+            var aesKey = null;
+            try {
+                var agentPub = await crypto.subtle.importKey('raw', agentPubBytes, 'X25519', true, []);
+                var shared = await crypto.subtle.deriveBits(
+                    { name: 'X25519', public: agentPub }, x25519Private, 256
+                );
+                var hkdfKey = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
+                aesKey = await crypto.subtle.deriveKey(
+                    { name: 'HKDF', hash: 'SHA-256', salt: new ArrayBuffer(0), info: new TextEncoder().encode('yourbro-e2e-v1') },
+                    hkdfKey,
+                    { name: 'AES-GCM', length: 256 },
+                    false,
+                    ['encrypt', 'decrypt']
+                );
+            } catch(e) {
+                console.error('Key derivation failed:', e);
+                document.body.innerHTML = '<div class="status-msg">Encryption setup failed.<div class="subtitle">' + e.message + '</div></div>';
+                return;
             }
 
             // E2E helpers
@@ -407,19 +353,12 @@
                 return bytes;
             }
 
-            // 2e. Fetch page bundle from agent via E2E encrypted relay
-            var usedAgentId = e2eAgentId;
-            try {
-                var innerReq = JSON.stringify({
-                    id: crypto.randomUUID(),
-                    method: 'GET',
-                    path: '/api/page/' + encodeURIComponent(slug)
-                });
-                var encrypted = await e2eEncrypt(new TextEncoder().encode(innerReq));
-                var resp = await fetch(API + '/api/relay/' + e2eAgentId, {
+            // Encrypted relay helper — sends an encrypted inner request to the agent
+            async function encryptedRelay(innerReq) {
+                var encrypted = await e2eEncrypt(new TextEncoder().encode(JSON.stringify(innerReq)));
+                var resp = await fetch(API + '/api/public-page/' + agentUUID + '/' + encodeURIComponent(slug), {
                     method: 'POST',
-                    credentials: 'include',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Referrer': document.referrer || '' },
                     body: JSON.stringify({
                         id: crypto.randomUUID(),
                         encrypted: true,
@@ -427,32 +366,42 @@
                         payload: toBase64(encrypted)
                     })
                 });
-                if (resp.ok) {
-                    var envelope = await resp.json();
-                    if (envelope.encrypted && envelope.payload) {
-                        var decrypted = await e2eDecrypt(fromBase64(envelope.payload));
-                        var innerResp = JSON.parse(new TextDecoder().decode(decrypted));
-                        if (innerResp.status === 200 && innerResp.body) {
-                            pageData = JSON.parse(innerResp.body);
-                        }
-                    }
+                if (!resp.ok) return null;
+                var envelope = await resp.json();
+                if (!envelope.encrypted || !envelope.payload) return null;
+                var decrypted = await e2eDecrypt(fromBase64(envelope.payload));
+                return JSON.parse(new TextDecoder().decode(decrypted));
+            }
+
+            // 4. Fetch page bundle via E2E encrypted relay
+            var pageData = null;
+            try {
+                var innerResp = await encryptedRelay({
+                    id: crypto.randomUUID(),
+                    method: 'GET',
+                    path: '/api/page/' + encodeURIComponent(slug)
+                });
+                if (innerResp && innerResp.status === 200 && innerResp.body) {
+                    pageData = JSON.parse(innerResp.body);
                 }
             } catch(e) {
+                _dbg += 'E2E fetch error: ' + e.message + '\n';
                 console.error('E2E page fetch failed:', e);
             }
 
             if (!pageData || !pageData.files || !pageData.files['index.html']) {
                 document.body.innerHTML = '<div class="status-msg">' +
-                    'Your agent is currently offline.' +
-                    '<div class="subtitle">Start your agent to view this page.</div>' +
-                    '<a href="/#/dashboard">Go to dashboard</a>' +
+                    'This page is not available.' +
+                    '<div class="subtitle">The page may not exist or you may not have access.</div>' +
+                    (_debug ? '<pre style="font-size:11px;color:#555;margin-top:12px;text-align:left;max-width:400px;word-break:break-all">' + _dbg + '</pre>' : '') +
                     '</div>';
                 return;
             }
 
+            // 5. Render
             var iframe = await renderPage(pageData);
 
-            // 2f. Storage bridge — relay iframe postMessage to agent via E2E
+            // 6. Storage bridge — relay iframe postMessage to agent via E2E
             window.addEventListener('message', async function(event) {
                 if (!event.data || event.data.type !== 'yourbro-storage') return;
                 if (event.source !== iframe.contentWindow) return;
@@ -468,38 +417,19 @@
                 });
 
                 try {
-                    var innerReq = JSON.stringify({
+                    var innerResp = await encryptedRelay({
                         id: crypto.randomUUID(),
                         method: 'POST',
                         path: '/api/page-storage/' + action,
                         body: btoa(unescape(encodeURIComponent(innerBody))),
                         headers: { 'Content-Type': 'application/json' }
                     });
-                    var encrypted = await e2eEncrypt(new TextEncoder().encode(innerReq));
-                    var resp = await fetch(API + '/api/relay/' + usedAgentId, {
-                        method: 'POST',
-                        credentials: 'include',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            id: crypto.randomUUID(),
-                            encrypted: true,
-                            key_id: userKeyId,
-                            payload: toBase64(encrypted)
-                        })
-                    });
 
                     var result = { ok: false };
-                    if (resp.ok) {
-                        var envelope = await resp.json();
-                        if (envelope.encrypted && envelope.payload) {
-                            var decrypted = await e2eDecrypt(fromBase64(envelope.payload));
-                            var innerResp = JSON.parse(new TextDecoder().decode(decrypted));
-                            if (innerResp.status >= 200 && innerResp.status < 300) {
-                                result = { ok: true, data: innerResp.body ? JSON.parse(innerResp.body) : null };
-                            } else {
-                                result = { ok: false, error: innerResp.body || 'Agent error' };
-                            }
-                        }
+                    if (innerResp && innerResp.status >= 200 && innerResp.status < 300) {
+                        result = { ok: true, data: innerResp.body ? JSON.parse(innerResp.body) : null };
+                    } else if (innerResp) {
+                        result = { ok: false, error: innerResp.body || 'Agent error' };
                     }
 
                     iframe.contentWindow.postMessage({

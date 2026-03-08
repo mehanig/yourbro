@@ -199,7 +199,7 @@ func (db *DB) CreateAgent(ctx context.Context, userID int64, name, agentUUID str
 
 func (db *DB) ListAgents(ctx context.Context, userID int64) ([]models.Agent, error) {
 	rows, err := db.Pool.Query(ctx, `
-		SELECT uuid, id, user_id, name, paired_at
+		SELECT uuid, id, user_id, name, paired_at, x25519_public_key
 		FROM agents WHERE user_id = $1 ORDER BY paired_at DESC
 	`, userID)
 	if err != nil {
@@ -210,7 +210,7 @@ func (db *DB) ListAgents(ctx context.Context, userID int64) ([]models.Agent, err
 	var agents []models.Agent
 	for rows.Next() {
 		var a models.Agent
-		if err := rows.Scan(&a.ID, &a.DBId, &a.UserID, &a.Name, &a.PairedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.DBId, &a.UserID, &a.Name, &a.PairedAt, &a.X25519PubKey); err != nil {
 			return nil, err
 		}
 		agents = append(agents, a)
@@ -226,13 +226,19 @@ func (db *DB) DeleteAgent(ctx context.Context, uuid string, userID int64) error 
 func (db *DB) GetAgentByUUID(ctx context.Context, uuid string) (*models.Agent, error) {
 	var a models.Agent
 	err := db.Pool.QueryRow(ctx, `
-		SELECT uuid, id, user_id, name, paired_at
+		SELECT uuid, id, user_id, name, paired_at, x25519_public_key
 		FROM agents WHERE uuid = $1
-	`, uuid).Scan(&a.ID, &a.DBId, &a.UserID, &a.Name, &a.PairedAt)
+	`, uuid).Scan(&a.ID, &a.DBId, &a.UserID, &a.Name, &a.PairedAt, &a.X25519PubKey)
 	if err != nil {
 		return nil, err
 	}
 	return &a, nil
+}
+
+// UpdateAgentX25519PubKey stores the agent's X25519 public key.
+func (db *DB) UpdateAgentX25519PubKey(ctx context.Context, dbID int64, pubKey []byte) error {
+	_, err := db.Pool.Exec(ctx, `UPDATE agents SET x25519_public_key = $1 WHERE id = $2`, pubKey, dbID)
+	return err
 }
 
 // GetAgentByUserAndName finds an agent by user ID and name.

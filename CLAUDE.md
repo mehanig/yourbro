@@ -58,24 +58,32 @@ The API `Dockerfile` builds Go API. Frontend is NOT embedded — it deploys inde
   - **Blob fallback** (in-app browsers like Telegram/Instagram on iOS): WKWebView doesn't support Service Workers. The shell creates blob URLs for all files, rewrites `src`/`href` attributes in the HTML via DOM parsing (`DOMParser` + `querySelectorAll`), and injects a fetch/XHR/property-setter override so JS-initiated requests also resolve from blob URLs. The iframe loads via `srcdoc`. **No JS/CSS source files are ever modified** — only HTML attributes are rewritten. The override also patches `HTMLImageElement.src`, `HTMLScriptElement.src`, etc. property setters for dynamic DOM manipulation.
 - `sandbox="allow-scripts allow-same-origin"` is required on both paths — for SW access (SW path) and blob URL resolution (blob path)
 - Cloudflare Transform Rules: the `/p/*` shell rule excludes `.js`, `.css`, `.json` extensions so the SW file and cached assets are served correctly (not rewritten to shell.html)
-- Both rendering paths work for public and private pages — decryption (E2E relay) happens before `renderPage()`, so by the time it runs, `pageData.files` is plaintext regardless of source. In practice, the blob fallback primarily serves **public pages** shared via in-app browser links (Telegram, Instagram). Private pages require login + IndexedDB keys which in-app browsers don't have.
+- Both rendering paths work for all pages — E2E decryption happens before `renderPage()`, so by the time it runs, `pageData.files` is plaintext regardless of source. All visitors (paired and anonymous) generate X25519 keys stored in IndexedDB.
 - Guard: `if (parts[1] === 'assets') return;` prevents recursive shell reload when SW doesn't intercept `/p/assets/*` requests
 - **Debug mode**: append `?debug` to any page URL to see rendering path, SW state, blob map, and HTML preview as an on-screen overlay
 - **Page Storage**: Iframed pages communicate with the agent via `postMessage` → shell.html → E2E encrypted relay → agent `/api/page-storage/*` endpoints. No crypto in the iframe — shell is the encryption proxy. Slug is hardcoded by the shell (iframe can't write to other pages' storage).
 
 ### SECURITY: E2E encryption for page content relay
 
-The entire page bundle (HTML, JS, CSS — all files) is fetched in a single E2E encrypted relay request (`POST /api/relay/{agentId}`) using X25519 ECDH + HKDF-SHA256 + AES-256-GCM. The relay server is a blind pass-through — it cannot read page content.
+**All page traffic is E2E encrypted** — the server is zero-knowledge. The unified flow works for both public and private pages:
 
-The shell derives an AES key from the user's X25519 private key + agent's X25519 public key (exchanged during pairing), encrypts the relay request, and decrypts the encrypted response. The agent's relay router (`agent/internal/relay/router.go`) handles `encrypted: true` messages transparently.
+1. `GET /api/public-page/{username}/{slug}` — discovery only, returns `{ agent_uuid, x25519_public }` (CDN-cacheable, no content)
+2. Shell generates/loads X25519 key pair from IndexedDB (all visitors, paired or anonymous)
+3. Shell derives AES key via ECDH(viewer_priv, agent_pub) + HKDF-SHA256
+4. `POST /api/public-page/{agent_uuid}/{slug}` — sends encrypted blob, API relays blindly to agent by UUID (no auth)
+5. Agent decrypts, checks `key_id`: paired user (in `authorized_keys`) → any page; anonymous → `public:true` only
+6. Agent encrypts response, viewer decrypts, renders
+
+The agent publishes its X25519 pubkey during authenticated WS connect (`x25519_pub` query param). The API stores it in `agents.x25519_public_key`.
 
 Individual assets (JS, CSS, etc.) are **never fetched over the network**. After decryption, the shell sends all files to the Service Worker via in-browser `postMessage`. The SW caches them and serves them to the iframe locally. The `/p/assets/{slug}/*` URLs only exist between the SW cache and the iframe — they never hit the wire.
 
-**Private pages must always use E2E encryption.** If X25519 keys are missing, show an error and require re-pairing. Never fall back to plaintext relay for private pages.
+**"Decryption success = authentication."** If the agent can decrypt and the `key_id` matches a paired user in `authorized_keys`, that's proof of identity — no session cookie or content-token needed. Anonymous keys just get public pages.
 
-**Public pages** (opted in via `"public": true` in `page.json`) are served via plaintext relay through `GET /api/public-page/{username}/{slug}`. No auth or encryption required — anyone with the link can view. The agent checks the `public` flag before serving; non-public pages return 404. The API returns uniform 404 for all error cases (no info leakage). The shell branches on `localStorage.getItem('yb_logged_in')`: not set → try public endpoint; set → E2E encrypted path. (The `yb_session` cookie is httpOnly and invisible to JS.)
+**Page Storage** also goes through the same E2E encrypted relay — no cookies needed. The agent decides access based on `key_id`.
 
 ### Auth
-- Browser auth uses httpOnly `yb_session` cookie (cross-subdomain via `COOKIE_DOMAIN`)
-- Agent auth uses Bearer API tokens via Authorization header
+- **Dashboard**: httpOnly `yb_session` cookie (JWT, cross-subdomain via `COOKIE_DOMAIN`) for managing agents, tokens, and page list via `/api/relay/{agentId}`
+- **Page viewing**: no cookies — E2E encryption via X25519 keypairs in IndexedDB is the sole auth mechanism. Discovery + encrypted relay via `/api/public-page/` endpoints (no session required)
+- **Agent → API**: Bearer API tokens via Authorization header on WebSocket connect
 - OAuth callback at `api.yourbro.ai/auth/google/callback`, redirects to `yourbro.ai/#/callback`

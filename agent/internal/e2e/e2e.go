@@ -67,18 +67,30 @@ func (c *Cipher) Decrypt(data []byte) ([]byte, error) {
 	return c.aead.Open(nil, nonce, ciphertext, nil)
 }
 
-// CipherCache caches Cipher instances per user public key (base64).
+// lruEntry is a doubly-linked list node for LRU eviction.
+type lruEntry struct {
+	key    string
+	cipher *Cipher
+	prev   *lruEntry
+	next   *lruEntry
+}
+
+// CipherCache caches Cipher instances per user public key with LRU eviction.
 type CipherCache struct {
-	mu      sync.RWMutex
-	ciphers map[string]*Cipher
+	mu        sync.Mutex
+	entries   map[string]*lruEntry
+	head      *lruEntry // most recently used
+	tail      *lruEntry // least recently used
 	agentPriv *ecdh.PrivateKey
+	maxSize   int
 }
 
 // NewCipherCache creates a cache of ciphers keyed by user X25519 public key.
 func NewCipherCache(agentPriv *ecdh.PrivateKey) *CipherCache {
 	return &CipherCache{
-		ciphers:   make(map[string]*Cipher),
+		entries:   make(map[string]*lruEntry),
 		agentPriv: agentPriv,
+		maxSize:   10000,
 	}
 }
 
@@ -86,11 +98,12 @@ func NewCipherCache(agentPriv *ecdh.PrivateKey) *CipherCache {
 func (cc *CipherCache) Get(userX25519Pub *ecdh.PublicKey) (*Cipher, error) {
 	key := string(userX25519Pub.Bytes())
 
-	cc.mu.RLock()
-	c, ok := cc.ciphers[key]
-	cc.mu.RUnlock()
-	if ok {
-		return c, nil
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
+
+	if e, ok := cc.entries[key]; ok {
+		cc.moveToFront(e)
+		return e.cipher, nil
 	}
 
 	c, err := NewCipher(cc.agentPriv, userX25519Pub)
@@ -98,8 +111,58 @@ func (cc *CipherCache) Get(userX25519Pub *ecdh.PublicKey) (*Cipher, error) {
 		return nil, err
 	}
 
-	cc.mu.Lock()
-	cc.ciphers[key] = c
-	cc.mu.Unlock()
+	e := &lruEntry{key: key, cipher: c}
+	cc.entries[key] = e
+	cc.pushFront(e)
+
+	// Evict oldest if over capacity
+	for len(cc.entries) > cc.maxSize {
+		cc.removeTail()
+	}
+
 	return c, nil
+}
+
+func (cc *CipherCache) pushFront(e *lruEntry) {
+	e.prev = nil
+	e.next = cc.head
+	if cc.head != nil {
+		cc.head.prev = e
+	}
+	cc.head = e
+	if cc.tail == nil {
+		cc.tail = e
+	}
+}
+
+func (cc *CipherCache) moveToFront(e *lruEntry) {
+	if e == cc.head {
+		return
+	}
+	// Unlink
+	if e.prev != nil {
+		e.prev.next = e.next
+	}
+	if e.next != nil {
+		e.next.prev = e.prev
+	}
+	if e == cc.tail {
+		cc.tail = e.prev
+	}
+	// Push front
+	cc.pushFront(e)
+}
+
+func (cc *CipherCache) removeTail() {
+	if cc.tail == nil {
+		return
+	}
+	e := cc.tail
+	delete(cc.entries, e.key)
+	cc.tail = e.prev
+	if cc.tail != nil {
+		cc.tail.next = nil
+	} else {
+		cc.head = nil
+	}
 }

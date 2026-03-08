@@ -55,7 +55,7 @@ func main() {
 	log.Printf("=== PAIRING CODE: %s (expires in 5 minutes) ===", pairingCode)
 
 	pageStorageHandler := &handlers.PageStorageHandler{DB: db}
-	pagesHandler := &handlers.PagesHandler{PagesDir: pagesDir}
+	pagesHandler := &handlers.PagesHandler{PagesDir: pagesDir, DB: db}
 	pairHandler := &handlers.PairHandler{
 		DB:            db,
 		PairingCode:   pairingCode,
@@ -86,9 +86,9 @@ func main() {
 	r.Post("/api/revoke-key", pairHandler.RevokeKey)
 
 	// Page routes — read-only via relay. Pages are created by ClawdBot internally.
+	// Unified handler: paired users → any page, anonymous → public:true only.
 	r.Get("/api/pages", pagesHandler.List)
 	r.Get("/api/page/{slug}", pagesHandler.Get)
-	r.Get("/api/public-page/{slug}", pagesHandler.GetPublic)
 
 	// Page storage routes (auth via E2E encryption — only paired users can decrypt/encrypt)
 	r.Post("/api/page-storage/get", pageStorageHandler.Get)
@@ -112,13 +112,15 @@ func main() {
 	// Initialize E2E encryption and agent identity
 	var cipherCache *e2e.CipherCache
 	var agentUUID string
+	var x25519PubBytes []byte
 	if identity, err := db.GetOrCreateIdentity(); err != nil {
 		log.Printf("WARNING: E2E encryption disabled: %v", err)
 	} else {
 		cipherCache = e2e.NewCipherCache(identity.X25519PrivateKey)
 		agentUUID = identity.UUID
+		x25519PubBytes = identity.X25519PublicKey.Bytes()
 		log.Printf("Agent UUID: %s", agentUUID)
-		log.Printf("E2E encryption enabled (X25519 pub: %x...)", identity.X25519PublicKey.Bytes()[:8])
+		log.Printf("E2E encryption enabled (X25519 pub: %x...)", x25519PubBytes[:8])
 	}
 
 	// Auto-regenerate pairing code every 5 minutes
@@ -135,11 +137,12 @@ func main() {
 
 	router := &relay.Router{Mux: r, CipherCache: cipherCache, DB: db}
 	client := &relay.Client{
-		ServerURL: serverURL,
-		APIToken:  apiToken,
-		AgentName: agentName,
-		AgentUUID: agentUUID,
-		Handler:   router.HandleRequest,
+		ServerURL:    serverURL,
+		APIToken:     apiToken,
+		AgentName:    agentName,
+		AgentUUID:    agentUUID,
+		X25519PubKey: x25519PubBytes,
+		Handler:      router.HandleRequest,
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

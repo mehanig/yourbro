@@ -17,6 +17,7 @@ var validSlug = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 type PagesHandler struct {
 	PagesDir string
+	DB       interface{ IsX25519KeyAuthorized(keyID string) (string, bool) }
 }
 
 type pageMeta struct {
@@ -151,8 +152,19 @@ func (h *PagesHandler) buildBundle(slug string) (*pageBundle, int) {
 	}, http.StatusOK
 }
 
+// Get serves a page bundle. Access control is based on X-Yourbro-Key-ID:
+// paired user (key_id in authorized_keys) → any page; anonymous → public:true only.
 func (h *PagesHandler) Get(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
+	keyID := r.Header.Get("X-Yourbro-Key-ID")
+	isPaired := h.isPairedUser(keyID)
+	meta := readPageMeta(h.PagesDir, slug)
+
+	if !isPaired && !meta.Public {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "page not found"})
+		return
+	}
+
 	bundle, status := h.buildBundle(slug)
 	if bundle == nil {
 		writeJSON(w, status, map[string]string{"error": "page not found"})
@@ -161,20 +173,13 @@ func (h *PagesHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, bundle)
 }
 
-// GetPublic serves a page bundle only if the page is marked public in page.json.
-func (h *PagesHandler) GetPublic(w http.ResponseWriter, r *http.Request) {
-	slug := chi.URLParam(r, "slug")
-	meta := readPageMeta(h.PagesDir, slug)
-	if !meta.Public {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "page not found"})
-		return
+// isPairedUser checks if the key_id belongs to an authorized (paired) user.
+func (h *PagesHandler) isPairedUser(keyID string) bool {
+	if keyID == "" || h.DB == nil {
+		return false
 	}
-	bundle, status := h.buildBundle(slug)
-	if bundle == nil {
-		writeJSON(w, status, map[string]string{"error": "page not found"})
-		return
-	}
-	writeJSON(w, http.StatusOK, bundle)
+	_, ok := h.DB.IsX25519KeyAuthorized(keyID)
+	return ok
 }
 
 // readPageMeta reads page.json metadata (title, public flag). Falls back to slug for title.

@@ -21,11 +21,9 @@ You (human)                     ClawdBot                                        
     │                               │                                                   │
 ```
 
-### 2. Page Viewing & Data Storage (Browser → Agent via Relay)
+### 2. Page Viewing & Data Storage (Browser → Agent via E2E Encrypted Relay)
 
-When someone visits `yourbro.ai/p/{username}/{slug}`, a static HTML shell served from Cloudflare R2 runs client-side — it stays on `yourbro.ai` (same origin as the dashboard) so IndexedDB keypairs are accessible. The shell fetches agent IDs from the API, loads the page from the agent via relay, and renders it in a sandboxed iframe with the SDK injected.
-
-Storage operations use X25519 E2E encryption — if decryption succeeds, the sender is authenticated.
+All page traffic is E2E encrypted — the server is zero-knowledge. The same flow serves both public and private pages. The agent decides access based on `key_id`.
 
 ```
 PAIRING (one-time):
@@ -35,25 +33,42 @@ Browser                              Agent (via relay)
 │ Generate X25519  │                │ Print pairing    │
 │ keypair          │                │ code in logs     │
 │ (WebCrypto)      │                │                  │
+│ Store in         │                │                  │
+│ IndexedDB        │                │                  │
+│                  │                │                  │
 │ Enter code in    │                │                  │
 │ dashboard ───────┼── POST /pair ─>│ Verify code      │
 │                  │   (via relay)  │ Store X25519 key │
 │                  │<── agent key ──│ Return X25519 key│
 └──────────────────┘                └──────────────────┘
 
-PAGE VIEWING:
+PAGE VIEWING (unified E2E flow for all pages):
 
 Browser (yourbro.ai)     Cloudflare R2          api.yourbro.ai         Your Agent
    │                        │                       │                       │
    │── GET /p/user/slug ───>│                       │                       │
    │<── shell.html ─────────│                       │                       │
    │                                                │                       │
-   │── GET /api/page-agents/user ──────────────────>│                       │
-   │<── { agent_ids: [...] } ──────────────────────│                       │
-   │── POST /api/relay/ID ────────────────────────>│── WebSocket msg ─────>│
-   │<── page HTML ─────────────────────────────────│<── WebSocket resp ────│
-   │                                                                        │
-   │── Render in sandboxed iframe                                           │
+   │  Generate/load X25519 keypair from IndexedDB   │                       │
+   │  (all visitors — paired and anonymous)         │                       │
+   │                                                │                       │
+   │── GET /api/public-page/{user}/{slug} ─────────>│  (discovery only)     │
+   │<── { agent_uuid, x25519_public } ─────────────│                       │
+   │                                                │                       │
+   │  Derive AES key: ECDH(viewer_priv, agent_pub) + HKDF-SHA256           │
+   │  Encrypt inner request with AES-256-GCM        │                       │
+   │                                                │                       │
+   │── POST /api/public-page/{uuid}/{slug} ────────>│── WebSocket msg ─────>│
+   │   { encrypted: true, key_id, payload }         │   (opaque blob)       │
+   │                                                │                       │── Decrypt
+   │                                                │                       │── Check key_id:
+   │                                                │                       │   paired → any page
+   │                                                │                       │   anon → public only
+   │                                                │                       │── Encrypt response
+   │<── { encrypted: true, payload } ───────────────│<── WebSocket resp ────│
+   │                                                │                       │
+   │  Decrypt response                              │                       │
+   │  Render in sandboxed iframe                    │                       │
    │                                                                        │
    │   Two rendering paths (chosen automatically):                          │
    │   A) Service Worker (normal browsers):                                 │
@@ -64,24 +79,18 @@ Browser (yourbro.ai)     Cloudflare R2          api.yourbro.ai         Your Agen
    │      files, rewrites HTML src/href via DOMParser, injects fetch/XHR    │
    │      override + property setter patches → iframe.srcdoc = rewritten    │
    │      HTML. No JS/CSS source files modified — only HTML attributes.     │
-   │                                                                        │
-   │   Both paths work for public and private pages — E2E decryption        │
-   │   happens before renderPage(), so pageData.files is always plaintext.  │
-   │   In practice, blob fallback primarily serves public pages shared via  │
-   │   in-app browsers (Telegram, Instagram). Private pages require login   │
-   │   + IndexedDB keys which in-app browsers don't have.                   │
 
-RUNTIME (every request, E2E encrypted):
+STORAGE (same E2E relay, no cookies needed):
 
 Browser              api.yourbro.ai          Your Agent
    │                    │                       │
-   │── POST /relay/ID ─>│── WebSocket msg ─────>│
-   │   (E2E encrypted)  │   (opaque to server)  │── decrypt (auth = decryption success)
-   │                    │                       │── process request
-   │                    │<── WebSocket resp ────│
-   │<── JSON data ──────│                       │
+   │── POST /public-page/{uuid}/{slug} ───────>│
+   │   (E2E encrypted storage request)         │── Decrypt (auth = decryption success)
+   │                    │                       │── Read/write SQLite
+   │                    │<── WebSocket resp ────│── Encrypt response
+   │<── E2E response ──│                       │
 
-   yourbro server is a relay pipe — it never sees plaintext data (E2E encrypted).
+   Server is a relay pipe — it never sees plaintext (E2E encrypted).
 ```
 
 ### Zero-Trust Guarantees
@@ -136,7 +145,7 @@ YOURBRO_SERVER_URL=http://nginx
 YOURBRO_SQLITE_PATH=/data/agent.db
 ```
 
-The agent connects to the server via WebSocket automatically. No ports to open, no domain needed.
+The agent connects to the server via WebSocket automatically. No ports to open, no domain needed. During connection, the agent sends its X25519 public key as a query parameter — the API stores it for the discovery endpoint.
 
 ### 5. Pair Your Browser with the Agent
 
@@ -147,9 +156,14 @@ docker compose -f docker-compose.prod.yml -f docker-compose.local.yml logs agent
 # === PAIRING CODE: A7X3KP9M (expires in 5 minutes) ===
 ```
 
-In the dashboard, your agent appears in the "Paired Agents" section as online. Select it from the dropdown, enter the pairing code, and click **"Pair"**.
+In the dashboard, your agent appears under "Available Agents" as online. Enter the pairing code and click **"Pair"**.
 
-This generates an X25519 keypair in your browser and registers it with the agent for E2E encryption. One-time setup.
+This exchanges X25519 keys between your browser and the agent:
+- Browser generates an X25519 keypair, stores it in IndexedDB, sends the public key to the agent
+- Agent stores the browser's public key in `authorized_keys` (SQLite) and returns its own public key
+- Both sides can now derive a shared AES-256-GCM key via ECDH + HKDF-SHA256
+
+One-time setup. The keys persist across sessions.
 
 ### 6. Publish a Page
 
@@ -164,9 +178,11 @@ cat > /data/yourbro/pages/hello/index.html << 'EOF'
 <html><body><h1>Hello from yourbro!</h1></body></html>
 EOF
 
-# Optional: set a custom title
-echo '{"title": "Hello World"}' > /data/yourbro/pages/hello/page.json
+# Optional: set a custom title and make it public
+echo '{"title": "Hello World", "public": true}' > /data/yourbro/pages/hello/page.json
 ```
+
+Pages are private by default. Set `"public": true` in `page.json` to allow anonymous viewers. Private pages are only accessible to paired users.
 
 Page files live on your machine. To update, just edit the files — changes are live immediately. To delete:
 
@@ -178,7 +194,7 @@ rm -rf /data/yourbro/pages/hello/
 
 Go to `http://localhost/p/YOUR_USERNAME/hello`
 
-The page loads in an iframe. The SDK auto-initializes and communicates with the agent via E2E encrypted relay. Requests are encrypted with X25519 ECDH + AES-256-GCM and relayed through the WebSocket to your agent.
+The page loads in an iframe. All traffic is E2E encrypted — the shell generates X25519 keys, discovers the agent via the API, derives an AES key, and fetches the page bundle through an encrypted relay. The server never sees the page content.
 
 ### SDK API
 
@@ -278,33 +294,35 @@ bash deploy/deploy.sh
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/health` | — | Health check |
-| GET | `/api/page-agents/{username}` | Bearer | Get agent IDs for a user (used by page shell) |
-| GET | `/api/me` | Bearer | Current user |
-| GET | `/api/agents` | Bearer | List agents (with online status) |
-| GET | `/api/agents/stream` | Bearer | SSE stream for real-time agent status |
-| DELETE | `/api/agents/{id}` | Bearer | Remove agent |
-| POST | `/api/relay/{agent_id}` | Bearer | Relay request to agent via WebSocket |
-| GET | `/ws/agent` | Bearer | WebSocket endpoint for agent connection |
-| POST | `/api/tokens` | Bearer | Create API token |
-| GET | `/api/tokens` | Bearer | List API tokens |
-| DELETE | `/api/tokens/{id}` | Bearer | Revoke API token |
+| GET | `/api/public-page/{username}/{slug}` | — | Discovery: returns `{ agent_uuid, x25519_public }` for online agent |
+| POST | `/api/public-page/{agent_uuid}/{slug}` | — | Blind E2E encrypted relay to agent by UUID (no auth) |
+| GET | `/api/me` | Cookie | Current user |
+| GET | `/api/agents` | Cookie | List agents (with online status) |
+| GET | `/api/agents/stream` | Cookie | SSE stream for real-time agent status |
+| DELETE | `/api/agents/{id}` | Cookie | Remove agent |
+| POST | `/api/relay/{agent_id}` | Cookie | Authenticated relay to agent (dashboard operations) |
+| GET | `/ws/agent` | Bearer | WebSocket endpoint for agent connection (sends `x25519_pub`) |
+| POST | `/api/tokens` | Cookie | Create API token |
+| GET | `/api/tokens` | Cookie | List API tokens |
+| DELETE | `/api/tokens/{id}` | Cookie | Revoke API token |
+| GET | `/api/page-analytics` | Cookie | Page view analytics |
 
 ### Agent (reached via relay)
 
-All agent endpoints are accessed through `POST /api/relay/{agent_id}`. The relay envelope wraps the method, path, and headers.
+All agent endpoints are accessed through E2E encrypted relay. The relay envelope wraps the method, path, headers, and encrypted payload.
 
-| Method | Path | Auth | Description |
+| Method | Path | Access | Description |
 |---|---|---|---|
-| GET | `/health` | — | Health check |
+| GET | `/health` | Any | Health check |
 | POST | `/api/pair` | Pairing code | Register browser's X25519 public key |
-| POST | `/api/auth-check` | E2E relay | Check if browser is paired |
-| POST | `/api/revoke-key` | E2E relay | Revoke browser's encryption key |
-| GET | `/api/pages` | — | List all pages (scans page directories) |
-| GET | `/api/page/{slug}` | — | Get page file bundle (all files in directory) |
-| GET | `/api/storage/{slug}/{key}` | E2E relay | Get storage value |
-| PUT | `/api/storage/{slug}/{key}` | E2E relay | Set storage value |
-| GET | `/api/storage/{slug}?prefix=` | E2E relay | List storage keys |
-| DELETE | `/api/storage/{slug}/{key}` | E2E relay | Delete storage value |
+| POST | `/api/auth-check` | Paired | Check if browser is paired (decryption = auth) |
+| POST | `/api/revoke-key` | Paired | Revoke browser's encryption key |
+| GET | `/api/pages` | Any | List all pages (scans page directories) |
+| GET | `/api/page/{slug}` | Paired or public | Get page file bundle — paired users: any page; anonymous: public only |
+| POST | `/api/page-storage/get` | E2E relay | Get storage value |
+| POST | `/api/page-storage/set` | E2E relay | Set storage value |
+| POST | `/api/page-storage/delete` | E2E relay | Delete storage value |
+| POST | `/api/page-storage/list` | E2E relay | List storage keys |
 
 ## Project Structure
 
