@@ -59,29 +59,6 @@ export interface Page {
   updated_at: string;
 }
 
-/** Fetch page list from agent via relay. Returns empty array if agent is offline. */
-export async function listPagesViaRelay(agentId: string): Promise<Page[]> {
-  try {
-    const res = await fetch(`${API_BASE}/api/relay/${agentId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({
-        id: crypto.randomUUID(),
-        method: "GET",
-        path: "/api/pages",
-      }),
-    });
-    if (!res.ok) return [];
-    const envelope = await res.json();
-    if (envelope.status === 200 && envelope.body) {
-      return JSON.parse(envelope.body) as Page[];
-    }
-    return [];
-  } catch {
-    return [];
-  }
-}
 
 // Page Analytics
 export interface PageAnalytics {
