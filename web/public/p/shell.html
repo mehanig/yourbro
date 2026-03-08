@@ -31,8 +31,6 @@
                 return;
             }
 
-            // Guard: if path is /p/assets/..., the SW didn't intercept the iframe request
-            // and Cloudflare rewrote it back to shell.html. Don't re-run — show nothing.
             if (parts[1] === 'assets') return;
 
             var username = decodeURIComponent(parts[1]);
@@ -40,45 +38,10 @@
 
             document.title = slug + ' \u2014 yourbro';
 
-            // Register Service Worker for asset serving and await control
-            var swReady = null;
-            var swControlling = false;
-            if ('serviceWorker' in navigator) {
-                try {
-                    var swReg = await navigator.serviceWorker.register('/p/page-sw.js', { scope: '/p/' });
-                    swReady = navigator.serviceWorker.ready;
-                    // Await activation for first-time visitors
-                    var reg = await swReady;
-                    if (!reg.active) {
-                        await new Promise(function(resolve) {
-                            var sw = reg.installing || reg.waiting;
-                            if (!sw) { resolve(); return; }
-                            sw.addEventListener('statechange', function() {
-                                if (reg.active) resolve();
-                            });
-                        });
-                    }
-                    // Wait for SW to actually control this page (clients.claim())
-                    if (navigator.serviceWorker.controller) {
-                        swControlling = true;
-                    } else {
-                        await new Promise(function(resolve) {
-                            var timeout = setTimeout(function() { resolve(); }, 3000);
-                            navigator.serviceWorker.addEventListener('controllerchange', function() {
-                                clearTimeout(timeout);
-                                swControlling = true;
-                                resolve();
-                            });
-                        });
-                    }
-                } catch(e) {
-                    console.warn('SW registration failed:', e);
-                }
-            }
             var _debug = new URLSearchParams(window.location.search).has('debug');
-            var _dbg = 'SW: ready=' + !!swReady + ' ctrl=' + swControlling + '\n';
+            var _dbg = '';
 
-            // MIME type lookup (matches page-sw.js)
+            // MIME type lookup
             var MIMES = {
                 'html':'text/html;charset=utf-8','js':'application/javascript;charset=utf-8',
                 'mjs':'application/javascript;charset=utf-8','css':'text/css;charset=utf-8',
@@ -94,115 +57,77 @@
                 return d === -1 ? 'application/octet-stream' : (MIMES[name.substring(d+1).toLowerCase()] || 'application/octet-stream');
             }
 
-            // Shared rendering: cache files in SW and create iframe
+            // Render page: convert all assets to data URIs, load via srcdoc in sandboxed iframe
             async function renderPage(pageData) {
                 var pageTitle = pageData.title || slug;
                 document.title = pageTitle + ' \u2014 yourbro';
 
-                var swCached = false;
+                var files = pageData.files;
+                var dataMap = {};
 
-                // Send file bundle to Service Worker for caching
-                if (swReady && swControlling) {
-                    try {
-                        var reg = await swReady;
-                        var sw = reg.active;
-                        if (sw) {
-                            await new Promise(function(resolve) {
-                                var channel = new MessageChannel();
-                                channel.port1.onmessage = function() { resolve(); };
-                                sw.postMessage({
-                                    type: 'cache-page',
-                                    slug: slug,
-                                    files: pageData.files
-                                }, [channel.port2]);
-                            });
-                            swCached = true;
-                        }
-                    } catch(e) {
-                        console.warn('SW caching failed:', e);
+                // Create data URIs for all non-HTML files
+                for (var name in files) {
+                    if (name === 'index.html') continue;
+                    var content = files[name];
+                    var mime = fileMime(name);
+                    if (typeof content === 'string' && content.substring(0, 7) === 'base64:') {
+                        dataMap[name] = 'data:' + mime + ';base64,' + content.substring(7);
+                    } else if (typeof content === 'string') {
+                        dataMap[name] = 'data:' + mime + ';base64,' + btoa(unescape(encodeURIComponent(content)));
                     }
                 }
+
+                // Parse HTML and rewrite src/href/poster attributes to data URIs
+                var dp = new DOMParser();
+                var doc = dp.parseFromString(files['index.html'], 'text/html');
+
+                function resolveAttr(el, attr) {
+                    var val = el.getAttribute(attr);
+                    if (!val) return;
+                    var clean = val.replace(/^\.\//, '');
+                    if (dataMap[clean]) el.setAttribute(attr, dataMap[clean]);
+                }
+                doc.querySelectorAll('[src]').forEach(function(el) { resolveAttr(el, 'src'); });
+                doc.querySelectorAll('[href]').forEach(function(el) { resolveAttr(el, 'href'); });
+                doc.querySelectorAll('[poster]').forEach(function(el) { resolveAttr(el, 'poster'); });
+
+                // Inject fetch/XHR override so JS-initiated requests resolve from data URIs
+                var overrideEl = doc.createElement('script');
+                overrideEl.textContent = '(function(){' +
+                    'var m=' + JSON.stringify(dataMap) + ';' +
+                    'function r(u){return u.replace(/^\\.\\//,"");}' +
+                    'var F=window.fetch;window.fetch=function(u,o){' +
+                    'var k=r(typeof u==="string"?u:u.url);' +
+                    'if(m[k])return F(m[k],o);return F.apply(this,arguments)};' +
+                    'var X=XMLHttpRequest.prototype.open;' +
+                    'XMLHttpRequest.prototype.open=function(){' +
+                    'var u=arguments[1];if(typeof u==="string"){var k=r(u);if(m[k])arguments[1]=m[k]}' +
+                    'return X.apply(this,arguments)};' +
+                    '["src","href"].forEach(function(a){' +
+                    '["HTMLImageElement","HTMLScriptElement","HTMLLinkElement","HTMLSourceElement","HTMLMediaElement"].forEach(function(t){' +
+                    'var P=window[t]&&window[t].prototype;if(!P)return;' +
+                    'var d=Object.getOwnPropertyDescriptor(P,a);if(!d||!d.set)return;' +
+                    'Object.defineProperty(P,a,{set:function(v){' +
+                    'var k=r(typeof v==="string"?v:v);if(m[k])return d.set.call(this,m[k]);' +
+                    'return d.set.call(this,v)},get:d.get,configurable:true})})})' +
+                    '})()';
+                var head = doc.head || doc.documentElement;
+                head.insertBefore(overrideEl, head.firstChild);
+
+                var html = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+
+                _dbg += 'files=' + Object.keys(files).length + '\n';
+                _dbg += 'data-uris=' + Object.keys(dataMap).join(',') + '\n';
 
                 var container = document.createElement('div');
                 container.className = 'frame-container';
                 var iframe = document.createElement('iframe');
-
-                if (swCached) {
-                    // SW path — serves files from cache
-                    iframe.src = '/p/assets/' + slug + '/index.html';
-                    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
-                    _dbg += 'path=SW\n';
-                } else {
-                  try {
-                    _dbg += 'path=BLOB files=' + Object.keys(pageData.files).length + '\n';
-                    // No-SW fallback: blob URLs + fetch/XHR override
-                    var files = pageData.files;
-                    var blobMap = {};
-
-                    // Create blob URLs for all non-HTML files
-                    for (var name in files) {
-                        if (name === 'index.html') continue;
-                        var content = files[name];
-                        if (typeof content === 'string' && content.substring(0, 7) === 'base64:') {
-                            var bin = atob(content.substring(7));
-                            var bytes = new Uint8Array(bin.length);
-                            for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-                            blobMap[name] = URL.createObjectURL(new Blob([bytes], { type: fileMime(name) }));
-                        } else if (typeof content === 'string') {
-                            blobMap[name] = URL.createObjectURL(new Blob([content], { type: fileMime(name) }));
-                        }
-                    }
-
-                    // Parse HTML and rewrite only src/href attributes
-                    var dp = new DOMParser();
-                    var doc = dp.parseFromString(files['index.html'], 'text/html');
-
-                    function resolveAttr(el, attr) {
-                        var val = el.getAttribute(attr);
-                        if (!val) return;
-                        var clean = val.replace(/^\.\//, '');
-                        if (blobMap[clean]) el.setAttribute(attr, blobMap[clean]);
-                    }
-                    doc.querySelectorAll('[src]').forEach(function(el) { resolveAttr(el, 'src'); });
-                    doc.querySelectorAll('[href]').forEach(function(el) { resolveAttr(el, 'href'); });
-                    doc.querySelectorAll('[poster]').forEach(function(el) { resolveAttr(el, 'poster'); });
-
-                    // Inject fetch/XHR override as first script in <head>
-                    var overrideEl = doc.createElement('script');
-                    overrideEl.textContent = '(function(){' +
-                        'var m=' + JSON.stringify(blobMap) + ';' +
-                        'function r(u){return u.replace(/^\\.\\//,"");}' +
-                        'var F=window.fetch;window.fetch=function(u,o){' +
-                        'var k=r(typeof u==="string"?u:u.url);' +
-                        'if(m[k])return F(m[k],o);return F.apply(this,arguments)};' +
-                        'var X=XMLHttpRequest.prototype.open;' +
-                        'XMLHttpRequest.prototype.open=function(){' +
-                        'var u=arguments[1];if(typeof u==="string"){var k=r(u);if(m[k])arguments[1]=m[k]}' +
-                        'return X.apply(this,arguments)};' +
-                        '["src","href"].forEach(function(a){' +
-                        '["HTMLImageElement","HTMLScriptElement","HTMLLinkElement","HTMLSourceElement","HTMLMediaElement"].forEach(function(t){' +
-                        'var P=window[t]&&window[t].prototype;if(!P)return;' +
-                        'var d=Object.getOwnPropertyDescriptor(P,a);if(!d||!d.set)return;' +
-                        'Object.defineProperty(P,a,{set:function(v){' +
-                        'var k=r(typeof v==="string"?v:v);if(m[k])return d.set.call(this,m[k]);' +
-                        'return d.set.call(this,v)},get:d.get,configurable:true})})})' +
-                        '})()';
-                    var head = doc.head || doc.documentElement;
-                    head.insertBefore(overrideEl, head.firstChild);
-
-                    var html = '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
-
-                    _dbg += 'blobs=' + Object.keys(blobMap).join(',') + '\n';
-                    _dbg += 'html=' + html.length + 'b\n';
-                    _dbg += html.substring(0, 200) + '\n';
-                    iframe.srcdoc = html;
-                    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
-                  } catch(e) {
-                    _dbg += 'BLOB ERROR: ' + e.message + '\n';
-                  }
-                }
+                iframe.srcdoc = html;
+                iframe.setAttribute('sandbox', 'allow-scripts');
 
                 if (_debug) {
+                    _dbg += 'html=' + html.length + 'b\n';
+                    _dbg += html.substring(0, 200) + '\n';
                     var dbgEl = document.createElement('pre');
                     dbgEl.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#000;color:#0f0;font-size:11px;padding:8px;max-height:40vh;overflow:auto;white-space:pre-wrap;word-break:break-all';
                     dbgEl.textContent = _dbg;

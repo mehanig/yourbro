@@ -53,15 +53,11 @@ The API `Dockerfile` builds Go API. Frontend is NOT embedded — it deploys inde
 ### Pages architecture
 - Pages are **directory-based**: each page is a folder at `/data/yourbro/pages/{slug}/` with `index.html` + assets (JS, CSS, etc.)
 - Pages are multi-file by design. **NEVER suggest inlining assets** — the entire point is separate files.
-- **Two rendering paths** (chosen automatically based on Service Worker availability):
-  - **SW path** (normal browsers): A Service Worker (`web/public/p/page-sw.js`) caches the file bundle and serves sub-resources at `/p/assets/{slug}/*`. The shell sets `iframe.src = "/p/assets/{slug}/index.html"` — the SW serves it. Relative URLs resolve naturally.
-  - **Blob fallback** (in-app browsers like Telegram/Instagram on iOS): WKWebView doesn't support Service Workers. The shell creates blob URLs for all files, rewrites `src`/`href` attributes in the HTML via DOM parsing (`DOMParser` + `querySelectorAll`), and injects a fetch/XHR/property-setter override so JS-initiated requests also resolve from blob URLs. The iframe loads via `srcdoc`. **No JS/CSS source files are ever modified** — only HTML attributes are rewritten. The override also patches `HTMLImageElement.src`, `HTMLScriptElement.src`, etc. property setters for dynamic DOM manipulation.
-- `sandbox="allow-scripts allow-same-origin"` is required on both paths — for SW access (SW path) and blob URL resolution (blob path)
-- Cloudflare Transform Rules: the `/p/*` shell rule excludes `.js`, `.css`, `.json` extensions so the SW file and cached assets are served correctly (not rewritten to shell.html)
-- Both rendering paths work for all pages — E2E decryption happens before `renderPage()`, so by the time it runs, `pageData.files` is plaintext regardless of source. All visitors (paired and anonymous) generate X25519 keys stored in IndexedDB.
-- Guard: `if (parts[1] === 'assets') return;` prevents recursive shell reload when SW doesn't intercept `/p/assets/*` requests
-- **Debug mode**: append `?debug` to any page URL to see rendering path, SW state, blob map, and HTML preview as an on-screen overlay
-- **Page Storage**: Iframed pages communicate with the agent via `postMessage` → shell.html → E2E encrypted relay → agent `/api/page-storage/*` endpoints. No crypto in the iframe — shell is the encryption proxy. Slug is hardcoded by the shell (iframe can't write to other pages' storage).
+- **Single rendering path (srcdoc + data URIs)**: The shell converts all page assets to data URIs, rewrites `src`/`href`/`poster` attributes in the HTML via DOM parsing (`DOMParser` + `querySelectorAll`), and injects a fetch/XHR/property-setter override so JS-initiated requests also resolve from data URIs. The iframe loads via `srcdoc`. **No JS/CSS source files are ever modified** — only HTML attributes are rewritten. The override also patches `HTMLImageElement.src`, `HTMLScriptElement.src`, etc. property setters for dynamic DOM manipulation.
+- `sandbox="allow-scripts"` on the iframe (no `allow-same-origin`). This gives the iframe an **opaque origin**, preventing access to the parent shell's IndexedDB, cookies, and DOM. This is critical for security: page content is untrusted, and the viewer's X25519 private key lives in IndexedDB on the shell's origin.
+- E2E decryption happens before `renderPage()`, so by the time it runs, `pageData.files` is plaintext. All visitors (paired and anonymous) generate X25519 keys stored in IndexedDB.
+- **Debug mode**: append `?debug` to any page URL to see file count, data URI map, and HTML preview as an on-screen overlay
+- **Page Storage**: Iframed pages communicate with the agent via `postMessage` (works cross-origin) -> shell.html -> E2E encrypted relay -> agent `/api/page-storage/*` endpoints. No crypto in the iframe. Shell is the encryption proxy. Slug is hardcoded by the shell (iframe can't write to other pages' storage).
 
 ### SECURITY: E2E encryption for page content relay
 
@@ -76,7 +72,7 @@ The API `Dockerfile` builds Go API. Frontend is NOT embedded — it deploys inde
 
 The agent publishes its X25519 pubkey during authenticated WS connect (`x25519_pub` query param). The API stores it in `agents.x25519_public_key`.
 
-Individual assets (JS, CSS, etc.) are **never fetched over the network**. After decryption, the shell sends all files to the Service Worker via in-browser `postMessage`. The SW caches them and serves them to the iframe locally. The `/p/assets/{slug}/*` URLs only exist between the SW cache and the iframe — they never hit the wire.
+Individual assets (JS, CSS, etc.) are **never fetched over the network**. After decryption, the shell converts all files to data URIs and embeds them directly in the srcdoc HTML. No asset URLs hit the wire.
 
 **"Decryption success = authentication."** If the agent can decrypt and the `key_id` matches a paired user in `authorized_keys`, that's proof of identity — no session cookie or content-token needed. Anonymous keys just get public pages.
 
