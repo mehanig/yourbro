@@ -11,7 +11,6 @@ function shellRewrite(): Plugin {
         if (
           req.url &&
           req.url.startsWith("/p/") &&
-          !req.url.startsWith("/p/page-sw.js") &&
           !req.url.startsWith("/p/shell.html") &&
           !req.url.match(/\.(js|css|json|map)(\?|$)/)
         ) {
