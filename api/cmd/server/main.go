@@ -627,10 +627,13 @@ func main() {
 			return
 		}
 
-		// Template the shell.html with custom domain values
+		// Template the shell.html with custom domain values.
+		// Use json.Marshal to safely encode into JS string literals.
+		apiURLJSON, _ := json.Marshal(apiURL)
+		usernameJSON, _ := json.Marshal(username)
 		html := shellHTML
-		html = strings.Replace(html, "/*YOURBRO_API_URL*/", apiURL, 1)
-		html = strings.Replace(html, "/*YOURBRO_CUSTOM_USER*/", username, 1)
+		html = strings.Replace(html, "'/*YOURBRO_API_URL*/'", string(apiURLJSON), 1)
+		html = strings.Replace(html, "'/*YOURBRO_CUSTOM_USER*/'", string(usernameJSON), 1)
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "public, max-age=300")
