@@ -130,6 +130,19 @@ type DailyView struct {
 	UniqueViews  int64  `json:"unique_views"`
 }
 
+// CustomDomain represents a user's custom domain for page serving.
+type CustomDomain struct {
+	ID                int64      `json:"id"`
+	UserID            int64      `json:"user_id,omitempty"`
+	Domain            string     `json:"domain"`
+	Verified          bool       `json:"verified"`
+	VerificationToken string     `json:"verification_token,omitempty"`
+	TLSProvisioned    bool       `json:"tls_provisioned"`
+	DefaultSlug       string     `json:"default_slug"`
+	CreatedAt         time.Time  `json:"created_at"`
+	VerifiedAt        *time.Time `json:"verified_at,omitempty"`
+}
+
 // ValidScopes defines allowed token scopes.
 var ValidScopes = map[string]bool{
 	"manage:keys": true,

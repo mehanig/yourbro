@@ -9,6 +9,7 @@ on:
       - 'deploy/**'
       - 'Dockerfile'
       - 'docker-compose*.yml'
+      - 'web/public/p/shell.html'
   workflow_dispatch:
 
 env:
