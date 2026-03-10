@@ -21,6 +21,7 @@ type createRequest struct {
 
 type sslConfig struct {
 	Method string `json:"method"`
+	Type   string `json:"type"`
 }
 
 type apiResponse struct {
@@ -44,7 +45,7 @@ type hostnameResult struct {
 func (c *Client) CreateCustomHostname(hostname string) (string, error) {
 	body, err := json.Marshal(createRequest{
 		Hostname: hostname,
-		SSL:      sslConfig{Method: "http"},
+		SSL:      sslConfig{Method: "http", Type: "dv"},
 	})
 	if err != nil {
 		return "", err
