@@ -91,8 +91,8 @@ export function CustomDomainsSection() {
 
   return (
     <div>
-      {/* Add domain form */}
-      <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
+      {/* Add domain form — hidden if user already has one */}
+      {domains.length === 0 && <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
         <input
           type="text"
           placeholder="pages.example.com"
@@ -108,7 +108,7 @@ export function CustomDomainsSection() {
         <button className="yb-btn-secondary" onClick={handleAdd} disabled={adding}>
           {adding ? "Adding..." : "Add Domain"}
         </button>
-      </div>
+      </div>}
 
       {error && <p style={{ color: "#f85149", fontSize: "0.85rem", marginBottom: "0.75rem" }}>{error}</p>}
 

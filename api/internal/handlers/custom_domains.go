@@ -39,6 +39,21 @@ func (h *CustomDomainsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Limit to one custom domain per user
+	existing, err := h.DB.ListCustomDomains(r.Context(), userID)
+	if err == nil && len(existing) > 0 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "only one custom domain is allowed per account"})
+		return
+	}
+
+	// Global limit to stay within Cloudflare free tier
+	var totalDomains int64
+	_ = h.DB.Pool.QueryRow(r.Context(), `SELECT COUNT(*) FROM custom_domains`).Scan(&totalDomains)
+	if totalDomains >= 95 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "custom domain limit reached, please contact support"})
+		return
+	}
+
 	// Basic domain validation
 	if strings.Contains(domain, " ") || !strings.Contains(domain, ".") {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid domain format"})
