@@ -273,10 +273,10 @@ func (db *DB) CreateCustomDomain(ctx context.Context, userID int64, domain, veri
 	err := db.Pool.QueryRow(ctx, `
 		INSERT INTO custom_domains (user_id, domain, verification_token)
 		VALUES ($1, $2, $3)
-		RETURNING id, user_id, domain, verified, verification_token, tls_provisioned, default_slug, created_at, verified_at
+		RETURNING id, user_id, domain, verified, verification_token, tls_provisioned, default_slug, cf_hostname_id, created_at, verified_at
 	`, userID, domain, verificationToken).Scan(
 		&d.ID, &d.UserID, &d.Domain, &d.Verified, &d.VerificationToken,
-		&d.TLSProvisioned, &d.DefaultSlug, &d.CreatedAt, &d.VerifiedAt,
+		&d.TLSProvisioned, &d.DefaultSlug, &d.CFHostnameID, &d.CreatedAt, &d.VerifiedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -286,7 +286,7 @@ func (db *DB) CreateCustomDomain(ctx context.Context, userID int64, domain, veri
 
 func (db *DB) ListCustomDomains(ctx context.Context, userID int64) ([]models.CustomDomain, error) {
 	rows, err := db.Pool.Query(ctx, `
-		SELECT id, user_id, domain, verified, verification_token, tls_provisioned, default_slug, created_at, verified_at
+		SELECT id, user_id, domain, verified, verification_token, tls_provisioned, default_slug, cf_hostname_id, created_at, verified_at
 		FROM custom_domains WHERE user_id = $1 ORDER BY created_at DESC
 	`, userID)
 	if err != nil {
@@ -298,7 +298,7 @@ func (db *DB) ListCustomDomains(ctx context.Context, userID int64) ([]models.Cus
 	for rows.Next() {
 		var d models.CustomDomain
 		if err := rows.Scan(&d.ID, &d.UserID, &d.Domain, &d.Verified, &d.VerificationToken,
-			&d.TLSProvisioned, &d.DefaultSlug, &d.CreatedAt, &d.VerifiedAt); err != nil {
+			&d.TLSProvisioned, &d.DefaultSlug, &d.CFHostnameID, &d.CreatedAt, &d.VerifiedAt); err != nil {
 			return nil, err
 		}
 		domains = append(domains, d)
@@ -312,13 +312,13 @@ func (db *DB) GetCustomDomainByHost(ctx context.Context, domain string) (*models
 	var username string
 	err := db.Pool.QueryRow(ctx, `
 		SELECT cd.id, cd.user_id, cd.domain, cd.verified, cd.verification_token,
-		       cd.tls_provisioned, cd.default_slug, cd.created_at, cd.verified_at, u.username
+		       cd.tls_provisioned, cd.default_slug, cd.cf_hostname_id, cd.created_at, cd.verified_at, u.username
 		FROM custom_domains cd
 		JOIN users u ON u.id = cd.user_id
 		WHERE cd.domain = $1 AND cd.verified = true
 	`, domain).Scan(
 		&d.ID, &d.UserID, &d.Domain, &d.Verified, &d.VerificationToken,
-		&d.TLSProvisioned, &d.DefaultSlug, &d.CreatedAt, &d.VerifiedAt, &username,
+		&d.TLSProvisioned, &d.DefaultSlug, &d.CFHostnameID, &d.CreatedAt, &d.VerifiedAt, &username,
 	)
 	if err != nil {
 		return nil, "", err
@@ -326,11 +326,11 @@ func (db *DB) GetCustomDomainByHost(ctx context.Context, domain string) (*models
 	return &d, username, nil
 }
 
-func (db *DB) VerifyCustomDomain(ctx context.Context, id, userID int64) error {
+func (db *DB) VerifyCustomDomain(ctx context.Context, id, userID int64, cfHostnameID string) error {
 	_, err := db.Pool.Exec(ctx, `
-		UPDATE custom_domains SET verified = true, verified_at = NOW()
+		UPDATE custom_domains SET verified = true, verified_at = NOW(), cf_hostname_id = $3
 		WHERE id = $1 AND user_id = $2
-	`, id, userID)
+	`, id, userID, cfHostnameID)
 	return err
 }
 
@@ -351,25 +351,16 @@ func (db *DB) UpdateCustomDomainDefaultSlug(ctx context.Context, id, userID int6
 func (db *DB) GetCustomDomainByID(ctx context.Context, id, userID int64) (*models.CustomDomain, error) {
 	var d models.CustomDomain
 	err := db.Pool.QueryRow(ctx, `
-		SELECT id, user_id, domain, verified, verification_token, tls_provisioned, default_slug, created_at, verified_at
+		SELECT id, user_id, domain, verified, verification_token, tls_provisioned, default_slug, cf_hostname_id, created_at, verified_at
 		FROM custom_domains WHERE id = $1 AND user_id = $2
 	`, id, userID).Scan(
 		&d.ID, &d.UserID, &d.Domain, &d.Verified, &d.VerificationToken,
-		&d.TLSProvisioned, &d.DefaultSlug, &d.CreatedAt, &d.VerifiedAt,
+		&d.TLSProvisioned, &d.DefaultSlug, &d.CFHostnameID, &d.CreatedAt, &d.VerifiedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	return &d, nil
-}
-
-// IsCustomDomainVerified checks if a domain exists and is verified (for autocert HostPolicy).
-func (db *DB) IsCustomDomainVerified(ctx context.Context, domain string) (bool, error) {
-	var exists bool
-	err := db.Pool.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM custom_domains WHERE domain = $1 AND verified = true)
-	`, domain).Scan(&exists)
-	return exists, err
 }
 
 // Page Views (analytics)

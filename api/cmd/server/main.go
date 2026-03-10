@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -24,11 +23,11 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
-	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/oauth2"
 
 	"github.com/mehanig/yourbro/api/internal/analytics"
 	"github.com/mehanig/yourbro/api/internal/auth"
+	cfclient "github.com/mehanig/yourbro/api/internal/cloudflare"
 	"github.com/mehanig/yourbro/api/internal/handlers"
 	"github.com/mehanig/yourbro/api/internal/middleware"
 	"github.com/mehanig/yourbro/api/internal/models"
@@ -127,7 +126,16 @@ func main() {
 
 	oauthCfg := auth.NewGoogleOAuthConfig()
 	keysHandler := &handlers.KeysHandler{DB: db}
-	customDomainsHandler := &handlers.CustomDomainsHandler{DB: db}
+
+	// Cloudflare client for Custom Hostnames (optional — nil in dev)
+	var cfClient *cfclient.Client
+	if cfZoneID := os.Getenv("CF_ZONE_ID"); cfZoneID != "" {
+		cfClient = &cfclient.Client{
+			ZoneID:   cfZoneID,
+			APIToken: os.Getenv("CF_API_TOKEN"),
+		}
+	}
+	customDomainsHandler := &handlers.CustomDomainsHandler{DB: db, CF: cfClient}
 	sseBroker := handlers.NewSSEBroker(db)
 	sseBroker.StartStaleChecker(context.Background())
 	relayHub := relay.NewHub(db, sseBroker.NotifyUser)
@@ -593,103 +601,63 @@ func main() {
 		})
 	})
 
-	// Custom domain shell serving handler
+	// Custom domain shell serving: host-based routing middleware.
+	// Requests with a Host header that isn't the API domain are served as custom domain pages.
 	apiURL := getEnv("API_URL", "https://api.yourbro.ai")
-	customDomainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := strings.ToLower(r.Host)
-		// Strip port if present
-		if i := strings.LastIndex(host, ":"); i != -1 {
-			host = host[:i]
-		}
+	apiHost := getEnv("API_HOST", "api.yourbro.ai")
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			host := strings.ToLower(r.Host)
+			if i := strings.LastIndex(host, ":"); i != -1 {
+				host = host[:i]
+			}
 
-		cd, username, err := db.GetCustomDomainByHost(r.Context(), host)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
+			// Known API hosts pass through to normal routing
+			if host == apiHost || host == "localhost" || host == "127.0.0.1" {
+				next.ServeHTTP(w, r)
+				return
+			}
 
-		// Determine slug from path
-		path := strings.TrimPrefix(r.URL.Path, "/")
-		path = strings.TrimSuffix(path, "/")
-		slug := path
-
-		if slug == "" {
-			// Root path — serve default slug
-			if cd.DefaultSlug == "" {
+			// Custom domain — look up in DB
+			cd, username, err := db.GetCustomDomainByHost(r.Context(), host)
+			if err != nil {
 				http.NotFound(w, r)
 				return
 			}
-			slug = cd.DefaultSlug
-		}
 
-		if !validSlugRe.MatchString(slug) {
-			http.NotFound(w, r)
-			return
-		}
+			path := strings.TrimPrefix(r.URL.Path, "/")
+			path = strings.TrimSuffix(path, "/")
+			slug := path
 
-		// Template the shell.html with custom domain values.
-		// Use json.Marshal to safely encode into JS string literals.
-		apiURLJSON, _ := json.Marshal(apiURL)
-		usernameJSON, _ := json.Marshal(username)
-		html := shellHTML
-		html = strings.Replace(html, "'/*YOURBRO_API_URL*/'", string(apiURLJSON), 1)
-		html = strings.Replace(html, "'/*YOURBRO_CUSTOM_USER*/'", string(usernameJSON), 1)
+			if slug == "" {
+				if cd.DefaultSlug == "" {
+					http.NotFound(w, r)
+					return
+				}
+				slug = cd.DefaultSlug
+			}
 
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "public, max-age=300")
-		w.Write([]byte(html))
+			if !validSlugRe.MatchString(slug) {
+				http.NotFound(w, r)
+				return
+			}
+
+			apiURLJSON, _ := json.Marshal(apiURL)
+			usernameJSON, _ := json.Marshal(username)
+			html := shellHTML
+			html = strings.Replace(html, "'/*YOURBRO_API_URL*/'", string(apiURLJSON), 1)
+			html = strings.Replace(html, "'/*YOURBRO_CUSTOM_USER*/'", string(usernameJSON), 1)
+
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			w.Write([]byte(html))
+		})
 	})
 
 	port := getEnv("PORT", "8080")
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: r,
-	}
-
-	// Autocert for custom domains (only in production)
-	var autocertManager *autocert.Manager
-	autocertPort := getEnv("AUTOCERT_PORT", "")
-	if autocertPort != "" {
-		cacheDir := getEnv("AUTOCERT_CACHE_DIR", "/data/autocert-cache")
-		autocertManager = &autocert.Manager{
-			Prompt: autocert.AcceptTOS,
-			Cache:  autocert.DirCache(cacheDir),
-			HostPolicy: func(ctx context.Context, host string) error {
-				verified, err := db.IsCustomDomainVerified(ctx, host)
-				if err != nil || !verified {
-					return fmt.Errorf("domain %s not verified", host)
-				}
-				return nil
-			},
-		}
-
-		// Custom domain HTTPS server with autocert
-		customRouter := chi.NewRouter()
-		customRouter.Use(chimw.Logger)
-		customRouter.Use(chimw.Recoverer)
-		customRouter.Use(chimw.RealIP)
-		customRouter.Handle("/*", customDomainHandler)
-
-		customSrv := &http.Server{
-			Addr:    ":" + autocertPort,
-			Handler: customRouter,
-			TLSConfig: &tls.Config{
-				GetCertificate: autocertManager.GetCertificate,
-			},
-		}
-
-		go func() {
-			log.Printf("Custom domain TLS server starting on :%s", autocertPort)
-			if err := customSrv.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
-				log.Printf("Custom domain TLS server error: %v", err)
-			}
-		}()
-	}
-
-	// If autocert is configured, handle ACME challenges on the main HTTP server
-	if autocertManager != nil {
-		// Register the ACME challenge handler
-		r.Handle("/.well-known/acme-challenge/*", autocertManager.HTTPHandler(nil))
 	}
 
 	// Graceful shutdown

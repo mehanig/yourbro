@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker:*)",
+      "Bash(npm install:*)",
+      "Read(//home/mehanig/.nvm/**)",
+      "Bash(command -v fnm)",
+      "Read(//usr/local/bin/**)",
+      "Read(//usr/bin/**)"
+    ]
+  }
+}

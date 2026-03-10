@@ -21,14 +21,10 @@ services:
       dockerfile: Dockerfile
     env_file: .env
     environment:
-      AUTOCERT_PORT: "8443"
-      AUTOCERT_CACHE_DIR: /data/autocert-cache
       API_URL: https://api.yourbro.ai
+      API_HOST: api.yourbro.ai
     expose:
       - "8080"
-      - "8443"
-    volumes:
-      - autocert-cache:/data/autocert-cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,4 +59,3 @@ volumes:
   pgdata:
   certbot-etc:
   certbot-var:
-  autocert-cache:

@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/mehanig/yourbro/api/internal/auth"
+	"github.com/mehanig/yourbro/api/internal/cloudflare"
 	"github.com/mehanig/yourbro/api/internal/middleware"
 	"github.com/mehanig/yourbro/api/internal/models"
 	"github.com/mehanig/yourbro/api/internal/storage"
@@ -17,6 +19,7 @@ import (
 
 type CustomDomainsHandler struct {
 	DB *storage.DB
+	CF *cloudflare.Client
 }
 
 func (h *CustomDomainsHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -135,22 +138,35 @@ func (h *CustomDomainsHandler) Verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check CNAME resolves (best-effort — CNAME lookup can be flaky)
+	// Check CNAME resolves (best-effort — CNAME lookup can be flaky).
+	// LookupCNAME returns the domain itself when there's no CNAME (A record only), which is fine.
 	cname, err := net.LookupCNAME(cd.Domain)
 	if err == nil && cname != "" {
-		// Normalize: strip trailing dot
 		cname = strings.TrimSuffix(cname, ".")
-		if cname != "custom.yourbro.ai" {
+		if cname != "custom.yourbro.ai" && cname != cd.Domain {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
 				"error":    fmt.Sprintf("CNAME points to %s, expected custom.yourbro.ai", cname),
-				"expected": "CNAME → custom.yourbro.ai",
+				"expected": "CNAME → custom.yourbro.ai (or A record to VPS IP)",
 			})
 			return
 		}
 	}
-	// If CNAME lookup fails, they might use A record — allow it
 
-	if err := h.DB.VerifyCustomDomain(r.Context(), id, userID); err != nil {
+	// Register with Cloudflare Custom Hostnames
+	cfHostnameID := ""
+	if h.CF != nil {
+		cfID, err := h.CF.CreateCustomHostname(cd.Domain)
+		if err != nil {
+			log.Printf("Cloudflare CreateCustomHostname failed for %s: %v", cd.Domain, err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "failed to register domain with CDN: " + err.Error(),
+			})
+			return
+		}
+		cfHostnameID = cfID
+	}
+
+	if err := h.DB.VerifyCustomDomain(r.Context(), id, userID, cfHostnameID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify domain"})
 		return
 	}
@@ -190,6 +206,21 @@ func (h *CustomDomainsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid domain id"})
 		return
+	}
+
+	// Look up the domain to get the Cloudflare hostname ID before deleting
+	cd, err := h.DB.GetCustomDomainByID(r.Context(), id, userID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "domain not found"})
+		return
+	}
+
+	// Remove from Cloudflare if registered
+	if h.CF != nil && cd.CFHostnameID != "" {
+		if err := h.CF.DeleteCustomHostname(cd.CFHostnameID); err != nil {
+			log.Printf("Cloudflare DeleteCustomHostname failed for %s (cf_id=%s): %v", cd.Domain, cd.CFHostnameID, err)
+			// Continue with DB deletion even if Cloudflare fails
+		}
 	}
 
 	if err := h.DB.DeleteCustomDomain(r.Context(), id, userID); err != nil {

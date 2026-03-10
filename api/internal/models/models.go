@@ -139,6 +139,7 @@ type CustomDomain struct {
 	VerificationToken string     `json:"verification_token,omitempty"`
 	TLSProvisioned    bool       `json:"tls_provisioned"`
 	DefaultSlug       string     `json:"default_slug"`
+	CFHostnameID      string     `json:"-"`
 	CreatedAt         time.Time  `json:"created_at"`
 	VerifiedAt        *time.Time `json:"verified_at,omitempty"`
 }
