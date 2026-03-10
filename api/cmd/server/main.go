@@ -321,123 +321,11 @@ func main() {
 		})
 	})
 
-	// Public page endpoints — E2E encrypted, no auth required.
-	// Permissive CORS: these are cookie-free, safe to open to all origins.
-
 	writeNotFound := func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(`{"error":"not found"}`))
 	}
-
-	r.Group(func(r chi.Router) {
-		r.Use(publicCORS)
-
-		// GET: discovery — returns agent UUID + X25519 pubkey (no content, no relay)
-		r.Get("/api/public-page/{username}/{slug}", func(w http.ResponseWriter, r *http.Request) {
-			username := chi.URLParam(r, "username")
-			slug := chi.URLParam(r, "slug")
-			if !validSlugRe.MatchString(slug) {
-				writeNotFound(w)
-				return
-			}
-
-			user, err := db.GetUserByUsername(r.Context(), username)
-			if err != nil {
-				writeNotFound(w)
-				return
-			}
-
-			agents, err := db.ListAgents(r.Context(), user.ID)
-			if err != nil || len(agents) == 0 {
-				writeNotFound(w)
-				return
-			}
-
-			// Find first online agent with X25519 pubkey
-			for _, agent := range agents {
-				if !relayHub.IsOnline(agent.ID) {
-					continue
-				}
-				if agent.X25519PubKey == nil {
-					continue
-				}
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("Cache-Control", "public, s-maxage=300")
-				json.NewEncoder(w).Encode(map[string]interface{}{
-					"agent_uuid":    agent.ID,
-					"x25519_public": base64.StdEncoding.EncodeToString(agent.X25519PubKey),
-				})
-				return
-			}
-			writeNotFound(w)
-		})
-
-		// POST: blind encrypted relay by agent UUID
-		r.Post("/api/public-page/{agent_uuid}/{slug}", func(w http.ResponseWriter, r *http.Request) {
-			agentUUID := chi.URLParam(r, "agent_uuid")
-			slug := chi.URLParam(r, "slug")
-			if !validSlugRe.MatchString(slug) {
-				writeNotFound(w)
-				return
-			}
-
-			var body struct {
-				ID        string `json:"id"`
-				Encrypted bool   `json:"encrypted"`
-				KeyID     string `json:"key_id"`
-				Payload   string `json:"payload"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				writeNotFound(w)
-				return
-			}
-			if !body.Encrypted || body.KeyID == "" || body.Payload == "" {
-				writeNotFound(w)
-				return
-			}
-
-			agent, err := db.GetAgentByUUID(r.Context(), agentUUID)
-			if err != nil || !relayHub.IsOnline(agent.ID) {
-				writeNotFound(w)
-				return
-			}
-
-			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-			defer cancel()
-
-			reqID, _ := auth.GenerateRandomHex(16)
-			resp, err := relayHub.SendRequest(ctx, agent.ID, models.RelayRequest{
-				ID: reqID, Encrypted: true, KeyID: body.KeyID, Payload: body.Payload,
-			})
-			if err != nil {
-				writeNotFound(w)
-				return
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(resp)
-
-			viewRecorder.Record(analytics.PageView{
-				UserID:    agent.UserID,
-				Slug:      slug,
-				IP:        r.RemoteAddr,
-				Referrer:  r.Header.Get("X-Referrer"),
-				UserAgent: r.UserAgent(),
-			})
-		})
-	})
-
-	// Logout — clears httpOnly session cookie (no auth required, uses auth CORS)
-	r.Group(func(r chi.Router) {
-		r.Use(authCORS)
-
-		r.Post("/api/logout", func(w http.ResponseWriter, r *http.Request) {
-			http.SetCookie(w, sessionCookie("", -1))
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"status":"ok"}`))
-		})
-	})
 
 	// WebSocket endpoint for relay-mode agents (agent auth via Bearer token)
 	r.Get("/ws/agent", func(w http.ResponseWriter, r *http.Request) {
@@ -473,10 +361,110 @@ func main() {
 	})
 
 	// Authenticated API routes (restrictive CORS)
-	r.Group(func(r chi.Router) {
-		r.Use(authCORS)
+	r.Route("/api", func(r chi.Router) {
+		// Public page endpoints — E2E encrypted, no auth required.
+		// Permissive CORS: these are cookie-free, safe to open to all origins.
+		r.Group(func(r chi.Router) {
+			r.Use(publicCORS)
 
-		r.Route("/api", func(r chi.Router) {
+			// GET: discovery — returns agent UUID + X25519 pubkey (no content, no relay)
+			r.Get("/public-page/{username}/{slug}", func(w http.ResponseWriter, r *http.Request) {
+				username := chi.URLParam(r, "username")
+				slug := chi.URLParam(r, "slug")
+				if !validSlugRe.MatchString(slug) {
+					writeNotFound(w)
+					return
+				}
+
+				user, err := db.GetUserByUsername(r.Context(), username)
+				if err != nil {
+					writeNotFound(w)
+					return
+				}
+
+				agents, err := db.ListAgents(r.Context(), user.ID)
+				if err != nil || len(agents) == 0 {
+					writeNotFound(w)
+					return
+				}
+
+				// Find first online agent with X25519 pubkey
+				for _, agent := range agents {
+					if !relayHub.IsOnline(agent.ID) {
+						continue
+					}
+					if agent.X25519PubKey == nil {
+						continue
+					}
+					w.Header().Set("Content-Type", "application/json")
+					w.Header().Set("Cache-Control", "public, s-maxage=300")
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"agent_uuid":    agent.ID,
+						"x25519_public": base64.StdEncoding.EncodeToString(agent.X25519PubKey),
+					})
+					return
+				}
+				writeNotFound(w)
+			})
+
+			// POST: blind encrypted relay by agent UUID
+			r.Post("/public-page/{agent_uuid}/{slug}", func(w http.ResponseWriter, r *http.Request) {
+				agentUUID := chi.URLParam(r, "agent_uuid")
+				slug := chi.URLParam(r, "slug")
+				if !validSlugRe.MatchString(slug) {
+					writeNotFound(w)
+					return
+				}
+
+				var body struct {
+					ID        string `json:"id"`
+					Encrypted bool   `json:"encrypted"`
+					KeyID     string `json:"key_id"`
+					Payload   string `json:"payload"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					writeNotFound(w)
+					return
+				}
+				if !body.Encrypted || body.KeyID == "" || body.Payload == "" {
+					writeNotFound(w)
+					return
+				}
+
+				agent, err := db.GetAgentByUUID(r.Context(), agentUUID)
+				if err != nil || !relayHub.IsOnline(agent.ID) {
+					writeNotFound(w)
+					return
+				}
+
+				ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+				defer cancel()
+
+				reqID, _ := auth.GenerateRandomHex(16)
+				resp, err := relayHub.SendRequest(ctx, agent.ID, models.RelayRequest{
+					ID: reqID, Encrypted: true, KeyID: body.KeyID, Payload: body.Payload,
+				})
+				if err != nil {
+					writeNotFound(w)
+					return
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(resp)
+
+				viewRecorder.Record(analytics.PageView{
+					UserID:    agent.UserID,
+					Slug:      slug,
+					IP:        r.RemoteAddr,
+					Referrer:  r.Header.Get("X-Referrer"),
+					UserAgent: r.UserAgent(),
+				})
+			})
+		})
+
+		// Authenticated API routes (restrictive CORS)
+		r.Group(func(r chi.Router) {
+			r.Use(authCORS)
 			r.Use(middleware.RequireAuth(db))
 
 			// User info
@@ -652,6 +640,16 @@ func main() {
 				r.Put("/{id}", customDomainsHandler.Update)
 				r.Delete("/{id}", customDomainsHandler.Delete)
 			})
+		})
+	})
+
+	// Logout outside /api Route (no auth required, uses auth CORS)
+	r.Group(func(r chi.Router) {
+		r.Use(authCORS)
+		r.Post("/api/logout", func(w http.ResponseWriter, r *http.Request) {
+			http.SetCookie(w, sessionCookie("", -1))
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"status":"ok"}`))
 		})
 	})
 
