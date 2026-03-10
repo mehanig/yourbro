@@ -134,6 +134,29 @@ export function HowToUsePage() {
             </p>
           </div>
 
+          {/* Custom Domains */}
+          <div style={{ marginBottom: "2.5rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
+              {icons.globe}
+              <h3 style={{ fontSize: "1.15rem", fontWeight: 700 }}>Custom Domains</h3>
+            </div>
+            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, marginBottom: "0.75rem" }}>
+              You can serve pages from your own domain instead of <code style={{ color: "#e6edf3", background: "#21262d", padding: "0.15rem 0.35rem", borderRadius: 4, fontSize: "0.85rem" }}>yourbro.ai/p/username/slug</code>. With a custom domain, your pages are available at <code style={{ color: "#e6edf3", background: "#21262d", padding: "0.15rem 0.35rem", borderRadius: 4, fontSize: "0.85rem" }}>yourdomain.com/slug</code>.
+            </p>
+            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, marginBottom: "0.75rem" }}>
+              Setup takes a few minutes:
+            </p>
+            <ol style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, paddingLeft: "1.25rem", margin: "0 0 0.75rem" }}>
+              <li style={{ marginBottom: "0.35rem" }}>Add your domain in the dashboard.</li>
+              <li style={{ marginBottom: "0.35rem" }}>Create a CNAME record pointing to <code style={{ color: "#e6edf3", background: "#21262d", padding: "0.15rem 0.35rem", borderRadius: 4, fontSize: "0.85rem" }}>custom.yourbro.ai</code> and a TXT record to verify ownership.</li>
+              <li style={{ marginBottom: "0.35rem" }}>Click Verify. Once confirmed, a TLS certificate is provisioned automatically via Let's Encrypt.</li>
+              <li style={{ marginBottom: "0.35rem" }}>Optionally set a default page to serve at the root of your domain.</li>
+            </ol>
+            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
+              No changes to your OpenClaw are needed. Custom domains use the same E2E encrypted relay as <code style={{ color: "#e6edf3", background: "#21262d", padding: "0.15rem 0.35rem", borderRadius: 4, fontSize: "0.85rem" }}>yourbro.ai</code>. The server still never sees your content.
+            </p>
+          </div>
+
           {/* Security */}
           <div style={{ marginBottom: "2rem" }}>
             <h3 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "1.25rem" }}>Security</h3>
