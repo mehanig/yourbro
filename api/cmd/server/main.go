@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -23,6 +24,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
+	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/oauth2"
 
 	"github.com/mehanig/yourbro/api/internal/analytics"
@@ -36,6 +38,9 @@ import (
 
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
+
+//go:embed shell.html
+var shellHTML string
 
 func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	// Create tracking table
@@ -122,6 +127,7 @@ func main() {
 
 	oauthCfg := auth.NewGoogleOAuthConfig()
 	keysHandler := &handlers.KeysHandler{DB: db}
+	customDomainsHandler := &handlers.CustomDomainsHandler{DB: db}
 	sseBroker := handlers.NewSSEBroker(db)
 	sseBroker.StartStaleChecker(context.Background())
 	relayHub := relay.NewHub(db, sseBroker.NotifyUser)
@@ -132,117 +138,128 @@ func main() {
 
 	r := chi.NewRouter()
 
-	// Global middleware
+	// Global middleware (non-CORS)
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.RealIP)
+
 	frontendURL := getEnv("FRONTEND_URL", "http://localhost:5173")
-	r.Use(cors.Handler(cors.Options{
+
+	// Restrictive CORS for authenticated routes
+	authCORS := cors.Handler(cors.Options{
 		// "null" origin comes from sandboxed iframes (sandbox="allow-scripts" without allow-same-origin)
 		AllowedOrigins:   []string{frontendURL, "null"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Referrer"},
 		AllowCredentials: true,
 		MaxAge:           86400,
-	}))
+	})
 
-	// Health check
+	// Permissive CORS for public-page routes (cookie-free, E2E encrypted)
+	publicCORS := cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders:   []string{"Content-Type", "X-Referrer"},
+		AllowCredentials: false,
+		MaxAge:           86400,
+	})
+
+	// Health check (no CORS needed)
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	// OAuth routes
-	r.Get("/auth/google", func(w http.ResponseWriter, r *http.Request) {
-		state, err := auth.GenerateRandomHex(16)
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		// Store state in short-lived httpOnly cookie for CSRF validation
-		http.SetCookie(w, &http.Cookie{
-			Name:     "oauth_state",
-			Value:    state,
-			Path:     "/auth/google/callback",
-			HttpOnly: true,
-			Secure:   getEnv("COOKIE_DOMAIN", "") != "",
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   300, // 5 minutes
-		})
-		url := oauthCfg.AuthCodeURL(state, oauth2.SetAuthURLParam("prompt", "select_account"))
-		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
-	})
+	// ACME HTTP-01 challenge handler (autocert handles this via the main HTTP server)
+	// autocert.Manager provides an HTTP handler for /.well-known/acme-challenge/
 
-	r.Get("/auth/google/callback", func(w http.ResponseWriter, r *http.Request) {
-		// Validate CSRF state
-		stateCookie, err := r.Cookie("oauth_state")
-		if err != nil || stateCookie.Value == "" {
-			http.Error(w, "missing state cookie", http.StatusBadRequest)
-			return
-		}
-		if r.URL.Query().Get("state") != stateCookie.Value {
-			http.Error(w, "invalid state parameter", http.StatusBadRequest)
-			return
-		}
-		// Clear state cookie
-		http.SetCookie(w, &http.Cookie{
-			Name:   "oauth_state",
-			Value:  "",
-			Path:   "/auth/google/callback",
-			MaxAge: -1,
+	// OAuth routes (use auth CORS)
+	r.Group(func(r chi.Router) {
+		r.Use(authCORS)
+
+		r.Get("/auth/google", func(w http.ResponseWriter, r *http.Request) {
+			state, err := auth.GenerateRandomHex(16)
+			if err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			// Store state in short-lived httpOnly cookie for CSRF validation
+			http.SetCookie(w, &http.Cookie{
+				Name:     "oauth_state",
+				Value:    state,
+				Path:     "/auth/google/callback",
+				HttpOnly: true,
+				Secure:   getEnv("COOKIE_DOMAIN", "") != "",
+				SameSite: http.SameSiteLaxMode,
+				MaxAge:   300, // 5 minutes
+			})
+			url := oauthCfg.AuthCodeURL(state, oauth2.SetAuthURLParam("prompt", "select_account"))
+			http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 		})
 
-		code := r.URL.Query().Get("code")
-		if code == "" {
-			http.Error(w, "missing code", http.StatusBadRequest)
-			return
-		}
+		r.Get("/auth/google/callback", func(w http.ResponseWriter, r *http.Request) {
+			// Validate CSRF state
+			stateCookie, err := r.Cookie("oauth_state")
+			if err != nil || stateCookie.Value == "" {
+				http.Error(w, "missing state cookie", http.StatusBadRequest)
+				return
+			}
+			if r.URL.Query().Get("state") != stateCookie.Value {
+				http.Error(w, "invalid state parameter", http.StatusBadRequest)
+				return
+			}
+			// Clear state cookie
+			http.SetCookie(w, &http.Cookie{
+				Name:   "oauth_state",
+				Value:  "",
+				Path:   "/auth/google/callback",
+				MaxAge: -1,
+			})
 
-		info, err := auth.GetGoogleUserInfo(r.Context(), oauthCfg, code)
-		if err != nil {
-			http.Error(w, "OAuth failed: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
+			code := r.URL.Query().Get("code")
+			if code == "" {
+				http.Error(w, "missing code", http.StatusBadRequest)
+				return
+			}
 
-		// Derive username from email
-		username := info.Email
-		if at := len(info.Email); at > 0 {
-			for i, c := range info.Email {
-				if c == '@' {
-					username = info.Email[:i]
-					break
+			info, err := auth.GetGoogleUserInfo(r.Context(), oauthCfg, code)
+			if err != nil {
+				http.Error(w, "OAuth failed: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			// Derive username from email
+			username := info.Email
+			if at := len(info.Email); at > 0 {
+				for i, c := range info.Email {
+					if c == '@' {
+						username = info.Email[:i]
+						break
+					}
 				}
 			}
-		}
 
-		user, err := db.UpsertUser(r.Context(), info.ID, info.Email, username)
-		if err != nil {
-			http.Error(w, "Failed to create user", http.StatusInternalServerError)
-			return
-		}
+			user, err := db.UpsertUser(r.Context(), info.ID, info.Email, username)
+			if err != nil {
+				http.Error(w, "Failed to create user", http.StatusInternalServerError)
+				return
+			}
 
-		token, err := auth.CreateSessionToken(user.ID)
-		if err != nil {
-			http.Error(w, "Failed to create session", http.StatusInternalServerError)
-			return
-		}
+			token, err := auth.CreateSessionToken(user.ID)
+			if err != nil {
+				http.Error(w, "Failed to create session", http.StatusInternalServerError)
+				return
+			}
 
-		http.SetCookie(w, sessionCookie(token, 7*24*60*60))
+			http.SetCookie(w, sessionCookie(token, 7*24*60*60))
 
-		// Redirect to frontend — session is in httpOnly cookie, no token in URL
-		http.Redirect(w, r, frontendURL+"/#/callback", http.StatusTemporaryRedirect)
-	})
-
-	// Logout — clears httpOnly session cookie (no auth required)
-	r.Post("/api/logout", func(w http.ResponseWriter, r *http.Request) {
-		http.SetCookie(w, sessionCookie("", -1))
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ok"}`))
+			// Redirect to frontend — session is in httpOnly cookie, no token in URL
+			http.Redirect(w, r, frontendURL+"/#/callback", http.StatusTemporaryRedirect)
+		})
 	})
 
 	// Public page endpoints — E2E encrypted, no auth required.
-	// GET: discovery — returns agent UUID + X25519 pubkey (no content, no relay)
-	// POST: blind encrypted relay by agent UUID
+	// Permissive CORS: these are cookie-free, safe to open to all origins.
 	var validSlugRe = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 	writeNotFound := func(w http.ResponseWriter) {
@@ -251,95 +268,112 @@ func main() {
 		w.Write([]byte(`{"error":"not found"}`))
 	}
 
-	r.Get("/api/public-page/{username}/{slug}", func(w http.ResponseWriter, r *http.Request) {
-		username := chi.URLParam(r, "username")
-		slug := chi.URLParam(r, "slug")
-		if !validSlugRe.MatchString(slug) {
-			writeNotFound(w)
-			return
-		}
+	r.Group(func(r chi.Router) {
+		r.Use(publicCORS)
 
-		user, err := db.GetUserByUsername(r.Context(), username)
-		if err != nil {
-			writeNotFound(w)
-			return
-		}
-
-		agents, err := db.ListAgents(r.Context(), user.ID)
-		if err != nil || len(agents) == 0 {
-			writeNotFound(w)
-			return
-		}
-
-		// Find first online agent with X25519 pubkey
-		for _, agent := range agents {
-			if !relayHub.IsOnline(agent.ID) {
-				continue
+		// GET: discovery — returns agent UUID + X25519 pubkey (no content, no relay)
+		r.Get("/api/public-page/{username}/{slug}", func(w http.ResponseWriter, r *http.Request) {
+			username := chi.URLParam(r, "username")
+			slug := chi.URLParam(r, "slug")
+			if !validSlugRe.MatchString(slug) {
+				writeNotFound(w)
+				return
 			}
-			if agent.X25519PubKey == nil {
-				continue
+
+			user, err := db.GetUserByUsername(r.Context(), username)
+			if err != nil {
+				writeNotFound(w)
+				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Cache-Control", "public, s-maxage=300")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"agent_uuid":    agent.ID,
-				"x25519_public": base64.StdEncoding.EncodeToString(agent.X25519PubKey),
+
+			agents, err := db.ListAgents(r.Context(), user.ID)
+			if err != nil || len(agents) == 0 {
+				writeNotFound(w)
+				return
+			}
+
+			// Find first online agent with X25519 pubkey
+			for _, agent := range agents {
+				if !relayHub.IsOnline(agent.ID) {
+					continue
+				}
+				if agent.X25519PubKey == nil {
+					continue
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "public, s-maxage=300")
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"agent_uuid":    agent.ID,
+					"x25519_public": base64.StdEncoding.EncodeToString(agent.X25519PubKey),
+				})
+				return
+			}
+			writeNotFound(w)
+		})
+
+		// POST: blind encrypted relay by agent UUID
+		r.Post("/api/public-page/{agent_uuid}/{slug}", func(w http.ResponseWriter, r *http.Request) {
+			agentUUID := chi.URLParam(r, "agent_uuid")
+			slug := chi.URLParam(r, "slug")
+			if !validSlugRe.MatchString(slug) {
+				writeNotFound(w)
+				return
+			}
+
+			var body struct {
+				ID        string `json:"id"`
+				Encrypted bool   `json:"encrypted"`
+				KeyID     string `json:"key_id"`
+				Payload   string `json:"payload"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				writeNotFound(w)
+				return
+			}
+			if !body.Encrypted || body.KeyID == "" || body.Payload == "" {
+				writeNotFound(w)
+				return
+			}
+
+			agent, err := db.GetAgentByUUID(r.Context(), agentUUID)
+			if err != nil || !relayHub.IsOnline(agent.ID) {
+				writeNotFound(w)
+				return
+			}
+
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+
+			reqID, _ := auth.GenerateRandomHex(16)
+			resp, err := relayHub.SendRequest(ctx, agent.ID, models.RelayRequest{
+				ID: reqID, Encrypted: true, KeyID: body.KeyID, Payload: body.Payload,
 			})
-			return
-		}
-		writeNotFound(w)
+			if err != nil {
+				writeNotFound(w)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+
+			viewRecorder.Record(analytics.PageView{
+				UserID:    agent.UserID,
+				Slug:      slug,
+				IP:        r.RemoteAddr,
+				Referrer:  r.Header.Get("X-Referrer"),
+				UserAgent: r.UserAgent(),
+			})
+		})
 	})
 
-	r.Post("/api/public-page/{agent_uuid}/{slug}", func(w http.ResponseWriter, r *http.Request) {
-		agentUUID := chi.URLParam(r, "agent_uuid")
-		slug := chi.URLParam(r, "slug")
-		if !validSlugRe.MatchString(slug) {
-			writeNotFound(w)
-			return
-		}
+	// Logout — clears httpOnly session cookie (no auth required, uses auth CORS)
+	r.Group(func(r chi.Router) {
+		r.Use(authCORS)
 
-		var body struct {
-			ID        string `json:"id"`
-			Encrypted bool   `json:"encrypted"`
-			KeyID     string `json:"key_id"`
-			Payload   string `json:"payload"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			writeNotFound(w)
-			return
-		}
-		if !body.Encrypted || body.KeyID == "" || body.Payload == "" {
-			writeNotFound(w)
-			return
-		}
-
-		agent, err := db.GetAgentByUUID(r.Context(), agentUUID)
-		if err != nil || !relayHub.IsOnline(agent.ID) {
-			writeNotFound(w)
-			return
-		}
-
-		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-		defer cancel()
-
-		reqID, _ := auth.GenerateRandomHex(16)
-		resp, err := relayHub.SendRequest(ctx, agent.ID, models.RelayRequest{
-			ID: reqID, Encrypted: true, KeyID: body.KeyID, Payload: body.Payload,
-		})
-		if err != nil {
-			writeNotFound(w)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
-
-		viewRecorder.Record(analytics.PageView{
-			UserID:    agent.UserID,
-			Slug:      slug,
-			IP:        r.RemoteAddr,
-			Referrer:  r.Header.Get("X-Referrer"),
-			UserAgent: r.UserAgent(),
+		r.Post("/api/logout", func(w http.ResponseWriter, r *http.Request) {
+			http.SetCookie(w, sessionCookie("", -1))
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"status":"ok"}`))
 		})
 	})
 
@@ -376,180 +410,286 @@ func main() {
 		relayHub.HandleAgentWS(w, r, token.UserID, agentName, agentUUID)
 	})
 
-	// Authenticated API routes
-	r.Route("/api", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(db))
+	// Authenticated API routes (restrictive CORS)
+	r.Group(func(r chi.Router) {
+		r.Use(authCORS)
 
-		// User info
-		r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
-			userID := middleware.GetUserID(r)
-			user, err := db.GetUserByID(r.Context(), userID)
-			if err != nil {
-				http.Error(w, "User not found", http.StatusNotFound)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(user)
-		})
+		r.Route("/api", func(r chi.Router) {
+			r.Use(middleware.RequireAuth(db))
 
-		// Token management
-		r.Post("/tokens", func(w http.ResponseWriter, r *http.Request) {
-			userID := middleware.GetUserID(r)
-			var req models.CreateTokenRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
-				return
-			}
-			for _, s := range req.Scopes {
-				if !models.ValidScopes[s] {
-					http.Error(w, fmt.Sprintf(`{"error":"invalid scope: %s"}`, s), http.StatusBadRequest)
+			// User info
+			r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
+				userID := middleware.GetUserID(r)
+				user, err := db.GetUserByID(r.Context(), userID)
+				if err != nil {
+					http.Error(w, "User not found", http.StatusNotFound)
 					return
 				}
-			}
-			if req.ExpiresIn <= 0 {
-				req.ExpiresIn = 3650
-			}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(user)
+			})
 
-			tokenStr, err := auth.GenerateAPIToken()
-			if err != nil {
-				http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
-				return
-			}
-			hash := auth.HashToken(tokenStr)
-			expiresAt := time.Now().Add(time.Duration(req.ExpiresIn) * 24 * time.Hour)
+			// Token management
+			r.Post("/tokens", func(w http.ResponseWriter, r *http.Request) {
+				userID := middleware.GetUserID(r)
+				var req models.CreateTokenRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+					return
+				}
+				for _, s := range req.Scopes {
+					if !models.ValidScopes[s] {
+						http.Error(w, fmt.Sprintf(`{"error":"invalid scope: %s"}`, s), http.StatusBadRequest)
+						return
+					}
+				}
+				if req.ExpiresIn <= 0 {
+					req.ExpiresIn = 3650
+				}
 
-			id, err := db.CreateToken(r.Context(), userID, hash, req.Name, req.Scopes, expiresAt)
-			if err != nil {
-				http.Error(w, `{"error":"failed to create token"}`, http.StatusInternalServerError)
-				return
-			}
+				tokenStr, err := auth.GenerateAPIToken()
+				if err != nil {
+					http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
+					return
+				}
+				hash := auth.HashToken(tokenStr)
+				expiresAt := time.Now().Add(time.Duration(req.ExpiresIn) * 24 * time.Hour)
 
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(models.CreateTokenResponse{
-				Token: tokenStr,
-				Name:  req.Name,
-				ID:    id,
+				id, err := db.CreateToken(r.Context(), userID, hash, req.Name, req.Scopes, expiresAt)
+				if err != nil {
+					http.Error(w, `{"error":"failed to create token"}`, http.StatusInternalServerError)
+					return
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				json.NewEncoder(w).Encode(models.CreateTokenResponse{
+					Token: tokenStr,
+					Name:  req.Name,
+					ID:    id,
+				})
+			})
+
+			r.Get("/tokens", func(w http.ResponseWriter, r *http.Request) {
+				userID := middleware.GetUserID(r)
+				tokens, err := db.ListTokens(r.Context(), userID)
+				if err != nil {
+					http.Error(w, `{"error":"failed to list tokens"}`, http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(tokens)
+			})
+
+			r.Delete("/tokens/{id}", func(w http.ResponseWriter, r *http.Request) {
+				userID := middleware.GetUserID(r)
+				id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+				if err != nil {
+					http.Error(w, `{"error":"invalid token id"}`, http.StatusBadRequest)
+					return
+				}
+				if err := db.DeleteToken(r.Context(), id, userID); err != nil {
+					http.Error(w, `{"error":"failed to delete token"}`, http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+			})
+
+			// Page analytics
+			r.Get("/page-analytics", func(w http.ResponseWriter, r *http.Request) {
+				userID := middleware.GetUserID(r)
+				stats, err := db.GetPageAnalytics(r.Context(), userID)
+				if err != nil {
+					http.Error(w, `{"error":"failed to get analytics"}`, http.StatusInternalServerError)
+					return
+				}
+				if stats == nil {
+					stats = []models.PageAnalytics{}
+				}
+				// Attach top referrers for each page (max 5)
+				for i := range stats {
+					refs, err := db.GetTopReferrers(r.Context(), userID, stats[i].Slug, 5)
+					if err == nil {
+						stats[i].TopReferrers = refs
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(stats)
+			})
+
+			// Per-page detailed analytics (for modal)
+			r.Get("/page-analytics/{slug}", func(w http.ResponseWriter, r *http.Request) {
+				userID := middleware.GetUserID(r)
+				slug := chi.URLParam(r, "slug")
+
+				stats, err := db.GetPageAnalytics(r.Context(), userID)
+				if err != nil {
+					http.Error(w, `{"error":"failed to get analytics"}`, http.StatusInternalServerError)
+					return
+				}
+				// Find the specific page
+				var pageStats *models.PageAnalytics
+				for i := range stats {
+					if stats[i].Slug == slug {
+						pageStats = &stats[i]
+						break
+					}
+				}
+
+				result := models.PageDetailedAnalytics{
+					Slug:         slug,
+					DailyViews:   []models.DailyView{},
+					TopReferrers: []models.Referrer{},
+				}
+				if pageStats != nil {
+					result.TotalViews = pageStats.TotalViews
+					result.UniqueVisitors = pageStats.UniqueVisitors
+					result.LastViewedAt = pageStats.LastViewedAt
+				}
+
+				// Daily views (last 30 days)
+				daily, err := db.GetPageDailyViews(r.Context(), userID, slug, 30)
+				if err == nil && daily != nil {
+					result.DailyViews = daily
+				}
+
+				// Top referrers (top 10)
+				refs, err := db.GetTopReferrers(r.Context(), userID, slug, 10)
+				if err == nil && refs != nil {
+					result.TopReferrers = refs
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(result)
+			})
+
+			// Agents
+			r.Route("/agents", func(r chi.Router) {
+				r.Post("/", agentsHandler.Register)
+				r.Get("/", agentsHandler.List)
+				r.Delete("/{id}", agentsHandler.Delete)
+			r.Get("/stream", sseBroker.ServeHTTP)
+			})
+
+			// Relay — forward requests to relay-mode agents via WebSocket
+			r.Post("/relay/{agent_id}", relayHandler.Relay)
+
+			// Public Keys
+			r.Route("/keys", func(r chi.Router) {
+				r.With(middleware.RequireScope("manage:keys")).Post("/", keysHandler.Create)
+				r.Get("/", keysHandler.List)
+				r.With(middleware.RequireScope("manage:keys")).Delete("/{id}", keysHandler.Delete)
+			})
+
+			// Custom Domains
+			r.Route("/custom-domains", func(r chi.Router) {
+				r.Post("/", customDomainsHandler.Create)
+				r.Get("/", customDomainsHandler.List)
+				r.Post("/{id}/verify", customDomainsHandler.Verify)
+				r.Put("/{id}", customDomainsHandler.Update)
+				r.Delete("/{id}", customDomainsHandler.Delete)
 			})
 		})
+	})
 
-		r.Get("/tokens", func(w http.ResponseWriter, r *http.Request) {
-			userID := middleware.GetUserID(r)
-			tokens, err := db.ListTokens(r.Context(), userID)
-			if err != nil {
-				http.Error(w, `{"error":"failed to list tokens"}`, http.StatusInternalServerError)
+	// Custom domain shell serving handler
+	apiURL := getEnv("API_URL", "https://api.yourbro.ai")
+	customDomainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := strings.ToLower(r.Host)
+		// Strip port if present
+		if i := strings.LastIndex(host, ":"); i != -1 {
+			host = host[:i]
+		}
+
+		cd, username, err := db.GetCustomDomainByHost(r.Context(), host)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Determine slug from path
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		path = strings.TrimSuffix(path, "/")
+		slug := path
+
+		if slug == "" {
+			// Root path — serve default slug
+			if cd.DefaultSlug == "" {
+				http.NotFound(w, r)
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(tokens)
-		})
+			slug = cd.DefaultSlug
+		}
 
-		r.Delete("/tokens/{id}", func(w http.ResponseWriter, r *http.Request) {
-			userID := middleware.GetUserID(r)
-			id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-			if err != nil {
-				http.Error(w, `{"error":"invalid token id"}`, http.StatusBadRequest)
-				return
-			}
-			if err := db.DeleteToken(r.Context(), id, userID); err != nil {
-				http.Error(w, `{"error":"failed to delete token"}`, http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
-		})
+		if !validSlugRe.MatchString(slug) {
+			http.NotFound(w, r)
+			return
+		}
 
-		// Page analytics
-		r.Get("/page-analytics", func(w http.ResponseWriter, r *http.Request) {
-			userID := middleware.GetUserID(r)
-			stats, err := db.GetPageAnalytics(r.Context(), userID)
-			if err != nil {
-				http.Error(w, `{"error":"failed to get analytics"}`, http.StatusInternalServerError)
-				return
-			}
-			if stats == nil {
-				stats = []models.PageAnalytics{}
-			}
-			// Attach top referrers for each page (max 5)
-			for i := range stats {
-				refs, err := db.GetTopReferrers(r.Context(), userID, stats[i].Slug, 5)
-				if err == nil {
-					stats[i].TopReferrers = refs
-				}
-			}
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(stats)
-		})
+		// Template the shell.html with custom domain values.
+		// Use json.Marshal to safely encode into JS string literals.
+		apiURLJSON, _ := json.Marshal(apiURL)
+		usernameJSON, _ := json.Marshal(username)
+		html := shellHTML
+		html = strings.Replace(html, "'/*YOURBRO_API_URL*/'", string(apiURLJSON), 1)
+		html = strings.Replace(html, "'/*YOURBRO_CUSTOM_USER*/'", string(usernameJSON), 1)
 
-		// Per-page detailed analytics (for modal)
-		r.Get("/page-analytics/{slug}", func(w http.ResponseWriter, r *http.Request) {
-			userID := middleware.GetUserID(r)
-			slug := chi.URLParam(r, "slug")
-
-			stats, err := db.GetPageAnalytics(r.Context(), userID)
-			if err != nil {
-				http.Error(w, `{"error":"failed to get analytics"}`, http.StatusInternalServerError)
-				return
-			}
-			// Find the specific page
-			var pageStats *models.PageAnalytics
-			for i := range stats {
-				if stats[i].Slug == slug {
-					pageStats = &stats[i]
-					break
-				}
-			}
-
-			result := models.PageDetailedAnalytics{
-				Slug:         slug,
-				DailyViews:   []models.DailyView{},
-				TopReferrers: []models.Referrer{},
-			}
-			if pageStats != nil {
-				result.TotalViews = pageStats.TotalViews
-				result.UniqueVisitors = pageStats.UniqueVisitors
-				result.LastViewedAt = pageStats.LastViewedAt
-			}
-
-			// Daily views (last 30 days)
-			daily, err := db.GetPageDailyViews(r.Context(), userID, slug, 30)
-			if err == nil && daily != nil {
-				result.DailyViews = daily
-			}
-
-			// Top referrers (top 10)
-			refs, err := db.GetTopReferrers(r.Context(), userID, slug, 10)
-			if err == nil && refs != nil {
-				result.TopReferrers = refs
-			}
-
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(result)
-		})
-
-		// Agents
-		r.Route("/agents", func(r chi.Router) {
-			r.Post("/", agentsHandler.Register)
-			r.Get("/", agentsHandler.List)
-			r.Delete("/{id}", agentsHandler.Delete)
-		r.Get("/stream", sseBroker.ServeHTTP)
-		})
-
-		// Relay — forward requests to relay-mode agents via WebSocket
-		r.Post("/relay/{agent_id}", relayHandler.Relay)
-
-		// Public Keys
-		r.Route("/keys", func(r chi.Router) {
-			r.With(middleware.RequireScope("manage:keys")).Post("/", keysHandler.Create)
-			r.Get("/", keysHandler.List)
-			r.With(middleware.RequireScope("manage:keys")).Delete("/{id}", keysHandler.Delete)
-		})
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Write([]byte(html))
 	})
 
 	port := getEnv("PORT", "8080")
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: r,
+	}
+
+	// Autocert for custom domains (only in production)
+	var autocertManager *autocert.Manager
+	autocertPort := getEnv("AUTOCERT_PORT", "")
+	if autocertPort != "" {
+		cacheDir := getEnv("AUTOCERT_CACHE_DIR", "/data/autocert-cache")
+		autocertManager = &autocert.Manager{
+			Prompt: autocert.AcceptTOS,
+			Cache:  autocert.DirCache(cacheDir),
+			HostPolicy: func(ctx context.Context, host string) error {
+				verified, err := db.IsCustomDomainVerified(ctx, host)
+				if err != nil || !verified {
+					return fmt.Errorf("domain %s not verified", host)
+				}
+				return nil
+			},
+		}
+
+		// Custom domain HTTPS server with autocert
+		customRouter := chi.NewRouter()
+		customRouter.Use(chimw.Logger)
+		customRouter.Use(chimw.Recoverer)
+		customRouter.Use(chimw.RealIP)
+		customRouter.Handle("/*", customDomainHandler)
+
+		customSrv := &http.Server{
+			Addr:    ":" + autocertPort,
+			Handler: customRouter,
+			TLSConfig: &tls.Config{
+				GetCertificate: autocertManager.GetCertificate,
+			},
+		}
+
+		go func() {
+			log.Printf("Custom domain TLS server starting on :%s", autocertPort)
+			if err := customSrv.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
+				log.Printf("Custom domain TLS server error: %v", err)
+			}
+		}()
+	}
+
+	// If autocert is configured, handle ACME challenges on the main HTTP server
+	if autocertManager != nil {
+		// Register the ACME challenge handler
+		r.Handle("/.well-known/acme-challenge/*", autocertManager.HTTPHandler(nil))
 	}
 
 	// Graceful shutdown
@@ -590,4 +730,3 @@ func sessionCookie(value string, maxAge int) *http.Cookie {
 		MaxAge:   maxAge,
 	}
 }
-

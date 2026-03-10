@@ -101,7 +101,7 @@ Ask your ClawdBot to publish a page. It will:
 1. Create the page directory: `mkdir -p /data/yourbro/pages/{slug}/`
 2. Write `index.html` (required) and any other files (JS, CSS, etc.)
 3. Optionally write `page.json` with `{"title": "My Page", "public": false}` for a custom title and visibility control
-4. The page goes live at `https://yourbro.ai/p/USERNAME/SLUG`
+4. The page goes live at `https://yourbro.ai/p/USERNAME/SLUG` (or `https://CUSTOM_DOMAIN/SLUG` if configured)
 
 To update a page, just edit the files — changes are live immediately. To delete a page, remove the directory. No API calls needed.
 
@@ -195,6 +195,7 @@ When the user asks you to publish a page or create a web page on yourbro:
    ```
 
 5. **Share the URL**: `https://yourbro.ai/p/USERNAME/my-page`
+   If the user has a custom domain configured (check via `GET /api/custom-domains`), also share: `https://CUSTOM_DOMAIN/my-page`
 
 ## Examples
 
@@ -208,7 +209,7 @@ EOF
 echo '{"title": "Hello World"}' > /data/yourbro/pages/hello/page.json
 ```
 
-Page is live at: `https://yourbro.ai/p/USERNAME/hello`
+Page is live at: `https://yourbro.ai/p/USERNAME/hello` (or `https://CUSTOM_DOMAIN/hello` if configured)
 
 ### Multi-file page with JS and CSS
 
@@ -317,6 +318,23 @@ window.parent.postMessage({
 ```
 
 All storage is scoped to the page slug and E2E encrypted through the relay. Your agent must be online for storage operations to work.
+
+## Custom Domains
+
+Users can serve pages from their own domain instead of `yourbro.ai/p/USERNAME/slug`. Custom domains use the URL format `https://CUSTOM_DOMAIN/slug` (no `/p/` prefix, username is implicit).
+
+To check if the user has custom domains configured:
+
+```bash
+curl https://api.yourbro.ai/api/custom-domains \
+  -H "Authorization: Bearer $YOURBRO_TOKEN"
+```
+
+Response is an array of domains. Each has a `domain` and `default_slug` field. When sharing page links, prefer the custom domain URL if one is configured and verified (`"verified": true`):
+- Default: `https://yourbro.ai/p/USERNAME/my-page`
+- Custom domain: `https://pages.example.com/my-page`
+
+Custom domains are set up by the user in the yourbro.ai dashboard (DNS CNAME + TXT verification). The agent does not need any configuration changes — custom domains use the same E2E encrypted relay.
 
 ## Security Model
 

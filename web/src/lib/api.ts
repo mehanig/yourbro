@@ -149,3 +149,50 @@ export async function logout(): Promise<void> {
   await request("/api/logout", { method: "POST" });
   setLoggedIn(false);
 }
+
+// Custom Domains
+export interface CustomDomain {
+  id: number;
+  domain: string;
+  verified: boolean;
+  verification_token: string;
+  tls_provisioned: boolean;
+  default_slug: string;
+  created_at: string;
+  verified_at?: string;
+}
+
+export interface AddDomainResponse {
+  domain: CustomDomain;
+  instructions: {
+    cname: string;
+    txt: string;
+    detail: string;
+  };
+}
+
+export function listCustomDomains(): Promise<CustomDomain[]> {
+  return request("/api/custom-domains");
+}
+
+export function addCustomDomain(domain: string): Promise<AddDomainResponse> {
+  return request("/api/custom-domains", {
+    method: "POST",
+    body: JSON.stringify({ domain }),
+  });
+}
+
+export function verifyCustomDomain(id: number): Promise<{ status: string; error?: string; expected?: string }> {
+  return request(`/api/custom-domains/${id}/verify`, { method: "POST" });
+}
+
+export function updateCustomDomain(id: number, defaultSlug: string): Promise<void> {
+  return request(`/api/custom-domains/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({ default_slug: defaultSlug }),
+  });
+}
+
+export function deleteCustomDomain(id: number): Promise<void> {
+  return request(`/api/custom-domains/${id}`, { method: "DELETE" });
+}

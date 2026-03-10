@@ -256,8 +256,8 @@ export function LoginPage() {
               desc: "Your OpenClaw connects outbound via WebSocket. No port forwarding, no public IP, no firewall rules.",
             },
             {
-              title: "Cryptographic Security",
-              desc: "X25519 key exchange, AES-256-GCM encryption, and E2E encrypted relay.",
+              title: "Custom Domains",
+              desc: "Serve pages from your own domain. Point a CNAME, verify ownership, and TLS certificates are provisioned automatically. Your pages, your URL.",
             },
             {
               title: "Built for OpenClaw",
