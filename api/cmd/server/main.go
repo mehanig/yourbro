@@ -33,6 +33,7 @@ import (
 	"github.com/mehanig/yourbro/api/internal/models"
 	"github.com/mehanig/yourbro/api/internal/relay"
 	"github.com/mehanig/yourbro/api/internal/storage"
+	"github.com/mehanig/yourbro/protocol/wire"
 )
 
 //go:embed migrations/*.sql
@@ -439,7 +440,7 @@ func main() {
 			defer cancel()
 
 			reqID, _ := auth.GenerateRandomHex(16)
-			resp, err := relayHub.SendRequest(ctx, agent.ID, models.RelayRequest{
+			resp, err := relayHub.SendRequest(ctx, agent.ID, wire.RelayRequest{
 				ID: reqID, Encrypted: true, KeyID: body.KeyID, Payload: body.Payload,
 			})
 			if err != nil {

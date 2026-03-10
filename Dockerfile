@@ -3,6 +3,9 @@ FROM golang:1.23-alpine AS builder
 RUN apk add --no-cache git
 WORKDIR /build
 
+# Copy protocol module (local dependency)
+COPY protocol/ ./protocol/
+
 # Cache Go modules
 COPY api/go.mod api/go.sum ./api/
 RUN cd api && go mod download

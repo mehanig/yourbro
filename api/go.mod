@@ -9,8 +9,11 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/joho/godotenv v1.5.1
+	github.com/mehanig/yourbro/protocol v0.0.0
 	golang.org/x/oauth2 v0.25.0
 )
+
+replace github.com/mehanig/yourbro/protocol => ../protocol
 
 require (
 	cloud.google.com/go/compute/metadata v0.3.0 // indirect

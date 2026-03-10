@@ -12,37 +12,14 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/mehanig/yourbro/protocol/wire"
 )
 
-// WireMessage is the WebSocket wire protocol envelope.
-type WireMessage struct {
-	Version int             `json:"v"`
-	Type    string          `json:"type"`
-	ID      string          `json:"id"`
-	Payload json.RawMessage `json:"payload"`
-}
+// Request is an alias for wire.RelayRequest.
+type Request = wire.RelayRequest
 
-// Request is the relay request payload (server → agent).
-type Request struct {
-	ID        string            `json:"id"`
-	Method    string            `json:"method,omitempty"`
-	Path      string            `json:"path,omitempty"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	Body      *string           `json:"body,omitempty"`
-	Encrypted bool              `json:"encrypted,omitempty"`
-	Payload   string            `json:"payload,omitempty"`
-	KeyID     string            `json:"key_id,omitempty"` // base64url X25519 public key of sender
-}
-
-// Response is the relay response payload (agent → server).
-type Response struct {
-	ID        string            `json:"id"`
-	Status    int               `json:"status,omitempty"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	Body      *string           `json:"body,omitempty"`
-	Encrypted bool              `json:"encrypted,omitempty"`
-	Payload   string            `json:"payload,omitempty"`
-}
+// Response is an alias for wire.RelayResponse.
+type Response = wire.RelayResponse
 
 // Client manages the WebSocket connection to the yourbro server.
 type Client struct {
@@ -141,7 +118,7 @@ func (c *Client) connect(ctx context.Context) error {
 
 	// Read loop
 	for {
-		var msg WireMessage
+		var msg wire.Message
 		err := wsjson.Read(ctx, conn, &msg)
 		if err != nil {
 			return err
@@ -169,7 +146,7 @@ func (c *Client) connect(ctx context.Context) error {
 				return
 			}
 
-			respMsg := WireMessage{
+			respMsg := wire.Message{
 				Version: 1,
 				Type:    "response",
 				ID:      req.ID,

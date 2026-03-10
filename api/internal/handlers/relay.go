@@ -9,13 +9,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/mehanig/yourbro/api/internal/middleware"
 	"github.com/mehanig/yourbro/api/internal/models"
+	"github.com/mehanig/yourbro/protocol/wire"
 )
 
 // RelayBackend abstracts the relay hub for testability.
 type RelayBackend interface {
 	GetAgentByUUID(ctx context.Context, uuid string) (*models.Agent, error)
 	IsOnline(agentUUID string) bool
-	SendRequest(ctx context.Context, agentUUID string, req models.RelayRequest) (models.RelayResponse, error)
+	SendRequest(ctx context.Context, agentUUID string, req wire.RelayRequest) (wire.RelayResponse, error)
 }
 
 type RelayHandler struct {
@@ -46,7 +47,7 @@ func (h *RelayHandler) Relay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse relay request
-	var req models.RelayRequest
+	var req wire.RelayRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return

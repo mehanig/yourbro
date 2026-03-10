@@ -1,7 +1,6 @@
 package models
 
 import (
-	"encoding/json"
 	"time"
 )
 
@@ -63,34 +62,6 @@ type CreateTokenResponse struct {
 type RegisterAgentRequest struct {
 	Name string `json:"name"`
 	UUID string `json:"uuid"`
-}
-
-type RelayRequest struct {
-	ID        string            `json:"id"`
-	Method    string            `json:"method,omitempty"`
-	Path      string            `json:"path,omitempty"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	Body      *string           `json:"body,omitempty"`
-	Encrypted bool              `json:"encrypted,omitempty"`
-	Payload   string            `json:"payload,omitempty"` // base64 of IV + AES-GCM ciphertext
-	KeyID     string            `json:"key_id,omitempty"`  // base64url X25519 public key of sender
-}
-
-type RelayResponse struct {
-	ID        string            `json:"id"`
-	Status    int               `json:"status,omitempty"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	Body      *string           `json:"body,omitempty"`
-	Encrypted bool              `json:"encrypted,omitempty"`
-	Payload   string            `json:"payload,omitempty"` // base64 of IV + AES-GCM ciphertext
-}
-
-// WireMessage is the WebSocket wire protocol envelope.
-type WireMessage struct {
-	Version int    `json:"v"`
-	Type    string `json:"type"` // "request" or "response"
-	ID      string `json:"id"`
-	Payload json.RawMessage `json:"payload"`
 }
 
 type OAuthCallbackResponse struct {

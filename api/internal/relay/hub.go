@@ -14,6 +14,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/mehanig/yourbro/api/internal/models"
 	"github.com/mehanig/yourbro/api/internal/storage"
+	"github.com/mehanig/yourbro/protocol/wire"
 )
 
 // Hub manages WebSocket connections from relay-mode agents.
@@ -32,7 +33,7 @@ type AgentConn struct {
 	agentUUID string
 
 	mu      sync.Mutex
-	pending map[string]chan models.RelayResponse // requestID → response channel
+	pending map[string]chan wire.RelayResponse // requestID → response channel
 }
 
 func NewHub(db *storage.DB, notify func(userID int64)) *Hub {
@@ -113,7 +114,7 @@ func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request, userID int64
 		ws:        conn,
 		userID:    userID,
 		agentUUID: agent.ID,
-		pending:   make(map[string]chan models.RelayResponse),
+		pending:   make(map[string]chan wire.RelayResponse),
 	}
 
 	// Register connection
@@ -139,7 +140,7 @@ func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request, userID int64
 	// Drain pending requests with error
 	ac.mu.Lock()
 	for id, ch := range ac.pending {
-		ch <- models.RelayResponse{
+		ch <- wire.RelayResponse{
 			ID:     id,
 			Status: 503,
 			Headers: map[string]string{"Content-Type": "application/json"},
@@ -160,7 +161,7 @@ func (h *Hub) HandleAgentWS(w http.ResponseWriter, r *http.Request, userID int64
 func (h *Hub) readLoop(ac *AgentConn) {
 	ctx := context.Background()
 	for {
-		var msg models.WireMessage
+		var msg wire.Message
 		err := wsjson.Read(ctx, ac.ws, &msg)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -173,7 +174,7 @@ func (h *Hub) readLoop(ac *AgentConn) {
 			continue
 		}
 
-		var resp models.RelayResponse
+		var resp wire.RelayResponse
 		if err := json.Unmarshal(msg.Payload, &resp); err != nil {
 			log.Printf("Agent %s: bad response payload: %v", ac.agentUUID, err)
 			continue
@@ -194,20 +195,20 @@ func (h *Hub) readLoop(ac *AgentConn) {
 }
 
 // SendRequest sends a relay request to an agent and waits for the response.
-func (h *Hub) SendRequest(ctx context.Context, agentUUID string, req models.RelayRequest) (models.RelayResponse, error) {
+func (h *Hub) SendRequest(ctx context.Context, agentUUID string, req wire.RelayRequest) (wire.RelayResponse, error) {
 	h.mu.RLock()
 	ac, ok := h.agents[agentUUID]
 	h.mu.RUnlock()
 	if !ok {
-		return models.RelayResponse{}, errors.New("agent not connected")
+		return wire.RelayResponse{}, errors.New("agent not connected")
 	}
 
 	// Create response channel
-	ch := make(chan models.RelayResponse, 1)
+	ch := make(chan wire.RelayResponse, 1)
 	ac.mu.Lock()
 	if ac.pending == nil {
 		ac.mu.Unlock()
-		return models.RelayResponse{}, errors.New("agent disconnected")
+		return wire.RelayResponse{}, errors.New("agent disconnected")
 	}
 	ac.pending[req.ID] = ch
 	ac.mu.Unlock()
@@ -218,11 +219,11 @@ func (h *Hub) SendRequest(ctx context.Context, agentUUID string, req models.Rela
 		ac.mu.Lock()
 		delete(ac.pending, req.ID)
 		ac.mu.Unlock()
-		return models.RelayResponse{}, err
+		return wire.RelayResponse{}, err
 	}
 
 	// Send to agent
-	msg := models.WireMessage{
+	msg := wire.Message{
 		Version: 1,
 		Type:    "request",
 		ID:      req.ID,
@@ -234,7 +235,7 @@ func (h *Hub) SendRequest(ctx context.Context, agentUUID string, req models.Rela
 		ac.mu.Lock()
 		delete(ac.pending, req.ID)
 		ac.mu.Unlock()
-		return models.RelayResponse{}, err
+		return wire.RelayResponse{}, err
 	}
 
 	// Wait for response with timeout
@@ -245,7 +246,7 @@ func (h *Hub) SendRequest(ctx context.Context, agentUUID string, req models.Rela
 		ac.mu.Lock()
 		delete(ac.pending, req.ID)
 		ac.mu.Unlock()
-		return models.RelayResponse{}, ctx.Err()
+		return wire.RelayResponse{}, ctx.Err()
 	}
 }
 

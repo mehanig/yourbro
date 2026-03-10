@@ -3,8 +3,12 @@ FROM golang:1.23-alpine AS builder
 RUN apk add --no-cache gcc musl-dev
 
 WORKDIR /build
-COPY agent/ .
-RUN CGO_ENABLED=1 go build -o yourbro-agent ./cmd/server
+
+# Copy protocol module (local dependency)
+COPY protocol/ ./protocol/
+
+COPY agent/ ./agent/
+RUN cd agent && CGO_ENABLED=1 go build -o /build/yourbro-agent ./cmd/server
 
 FROM alpine:3.20
 

@@ -6,7 +6,8 @@
       "Read(//home/mehanig/.nvm/**)",
       "Bash(command -v fnm)",
       "Read(//usr/local/bin/**)",
-      "Read(//usr/bin/**)"
+      "Read(//usr/bin/**)",
+      "Bash(go mod:*)"
     ]
   }
 }

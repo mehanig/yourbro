@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/mehanig/yourbro/api/internal/middleware"
 	"github.com/mehanig/yourbro/api/internal/models"
+	"github.com/mehanig/yourbro/protocol/wire"
 )
 
 // mockRelayBackend implements RelayBackend for testing.
@@ -32,9 +33,9 @@ func (m *mockRelayBackend) IsOnline(agentUUID string) bool {
 	return m.online[agentUUID]
 }
 
-func (m *mockRelayBackend) SendRequest(_ context.Context, _ string, req models.RelayRequest) (models.RelayResponse, error) {
+func (m *mockRelayBackend) SendRequest(_ context.Context, _ string, req wire.RelayRequest) (wire.RelayResponse, error) {
 	body := `{"status":"ok"}`
-	return models.RelayResponse{ID: req.ID, Status: 200, Body: &body}, nil
+	return wire.RelayResponse{ID: req.ID, Status: 200, Body: &body}, nil
 }
 
 func TestRelay_OtherUserCannotRelayToAgent(t *testing.T) {
@@ -54,7 +55,7 @@ func TestRelay_OtherUserCannotRelayToAgent(t *testing.T) {
 	r.Post("/api/relay/{agent_id}", handler.Relay)
 
 	makeRequest := func(userID int64) *httptest.ResponseRecorder {
-		body, _ := json.Marshal(models.RelayRequest{
+		body, _ := json.Marshal(wire.RelayRequest{
 			ID:        "req-1",
 			Encrypted: true,
 			KeyID:     "test-key-id",
@@ -91,7 +92,7 @@ func TestRelay_NonexistentAgent(t *testing.T) {
 	r := chi.NewRouter()
 	r.Post("/api/relay/{agent_id}", handler.Relay)
 
-	body, _ := json.Marshal(models.RelayRequest{
+	body, _ := json.Marshal(wire.RelayRequest{
 		ID:        "req-2",
 		Encrypted: true,
 		KeyID:     "test-key-id",
@@ -124,7 +125,7 @@ func TestRelay_OfflineAgent(t *testing.T) {
 	r := chi.NewRouter()
 	r.Post("/api/relay/{agent_id}", handler.Relay)
 
-	body, _ := json.Marshal(models.RelayRequest{
+	body, _ := json.Marshal(wire.RelayRequest{
 		ID:        "req-3",
 		Encrypted: true,
 		KeyID:     "test-key-id",
