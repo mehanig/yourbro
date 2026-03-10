@@ -7,6 +7,7 @@ import { useTokens } from "../hooks/useTokens";
 import { DashboardHeader } from "../components/DashboardHeader";
 import { PagesList } from "../components/PagesList";
 import { AgentsGrid } from "../components/AgentsGrid";
+import { CustomDomainsSection } from "../components/CustomDomainsSection";
 import { TokensSection } from "../components/TokensSection";
 import { AnalyticsModal } from "../components/AnalyticsModal";
 
@@ -80,6 +81,14 @@ export function DashboardPage() {
             onAnalytics={setAnalyticsSlug}
             onDelete={handleDelete}
           />
+        </div>
+
+        {/* Custom Domains */}
+        <div className="yb-dash-section">
+          <h2>
+            <span className="yb-icon">{"\u2B24"}</span> Custom Domains
+          </h2>
+          <CustomDomainsSection />
         </div>
 
         {/* Agents */}

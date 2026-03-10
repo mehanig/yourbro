@@ -15,7 +15,14 @@ services:
     image: mehanig.azurecr.io/yourbro:latest
     expose:
       - "8080"
+      - "8443"
     env_file: .env
+    environment:
+      AUTOCERT_PORT: "8443"
+      AUTOCERT_CACHE_DIR: /data/autocert-cache
+      API_URL: https://api.yourbro.ai
+    volumes:
+      - autocert-cache:/data/autocert-cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,3 +47,4 @@ services:
 
 volumes:
   pgdata:
+  autocert-cache:

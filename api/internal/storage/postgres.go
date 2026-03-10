@@ -266,6 +266,112 @@ func (db *DB) UpdateAgentName(ctx context.Context, uuid, name string) error {
 	return err
 }
 
+// Custom Domains
+
+func (db *DB) CreateCustomDomain(ctx context.Context, userID int64, domain, verificationToken string) (*models.CustomDomain, error) {
+	var d models.CustomDomain
+	err := db.Pool.QueryRow(ctx, `
+		INSERT INTO custom_domains (user_id, domain, verification_token)
+		VALUES ($1, $2, $3)
+		RETURNING id, user_id, domain, verified, verification_token, tls_provisioned, default_slug, created_at, verified_at
+	`, userID, domain, verificationToken).Scan(
+		&d.ID, &d.UserID, &d.Domain, &d.Verified, &d.VerificationToken,
+		&d.TLSProvisioned, &d.DefaultSlug, &d.CreatedAt, &d.VerifiedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+func (db *DB) ListCustomDomains(ctx context.Context, userID int64) ([]models.CustomDomain, error) {
+	rows, err := db.Pool.Query(ctx, `
+		SELECT id, user_id, domain, verified, verification_token, tls_provisioned, default_slug, created_at, verified_at
+		FROM custom_domains WHERE user_id = $1 ORDER BY created_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var domains []models.CustomDomain
+	for rows.Next() {
+		var d models.CustomDomain
+		if err := rows.Scan(&d.ID, &d.UserID, &d.Domain, &d.Verified, &d.VerificationToken,
+			&d.TLSProvisioned, &d.DefaultSlug, &d.CreatedAt, &d.VerifiedAt); err != nil {
+			return nil, err
+		}
+		domains = append(domains, d)
+	}
+	return domains, nil
+}
+
+// GetCustomDomainByHost looks up a verified custom domain and returns it along with the username.
+func (db *DB) GetCustomDomainByHost(ctx context.Context, domain string) (*models.CustomDomain, string, error) {
+	var d models.CustomDomain
+	var username string
+	err := db.Pool.QueryRow(ctx, `
+		SELECT cd.id, cd.user_id, cd.domain, cd.verified, cd.verification_token,
+		       cd.tls_provisioned, cd.default_slug, cd.created_at, cd.verified_at, u.username
+		FROM custom_domains cd
+		JOIN users u ON u.id = cd.user_id
+		WHERE cd.domain = $1 AND cd.verified = true
+	`, domain).Scan(
+		&d.ID, &d.UserID, &d.Domain, &d.Verified, &d.VerificationToken,
+		&d.TLSProvisioned, &d.DefaultSlug, &d.CreatedAt, &d.VerifiedAt, &username,
+	)
+	if err != nil {
+		return nil, "", err
+	}
+	return &d, username, nil
+}
+
+func (db *DB) VerifyCustomDomain(ctx context.Context, id, userID int64) error {
+	_, err := db.Pool.Exec(ctx, `
+		UPDATE custom_domains SET verified = true, verified_at = NOW()
+		WHERE id = $1 AND user_id = $2
+	`, id, userID)
+	return err
+}
+
+func (db *DB) DeleteCustomDomain(ctx context.Context, id, userID int64) error {
+	_, err := db.Pool.Exec(ctx, `DELETE FROM custom_domains WHERE id = $1 AND user_id = $2`, id, userID)
+	return err
+}
+
+func (db *DB) UpdateCustomDomainDefaultSlug(ctx context.Context, id, userID int64, slug string) error {
+	_, err := db.Pool.Exec(ctx, `
+		UPDATE custom_domains SET default_slug = $1
+		WHERE id = $2 AND user_id = $3
+	`, slug, id, userID)
+	return err
+}
+
+// GetCustomDomainByID returns a custom domain by ID and user ID.
+func (db *DB) GetCustomDomainByID(ctx context.Context, id, userID int64) (*models.CustomDomain, error) {
+	var d models.CustomDomain
+	err := db.Pool.QueryRow(ctx, `
+		SELECT id, user_id, domain, verified, verification_token, tls_provisioned, default_slug, created_at, verified_at
+		FROM custom_domains WHERE id = $1 AND user_id = $2
+	`, id, userID).Scan(
+		&d.ID, &d.UserID, &d.Domain, &d.Verified, &d.VerificationToken,
+		&d.TLSProvisioned, &d.DefaultSlug, &d.CreatedAt, &d.VerifiedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+// IsCustomDomainVerified checks if a domain exists and is verified (for autocert HostPolicy).
+func (db *DB) IsCustomDomainVerified(ctx context.Context, domain string) (bool, error) {
+	var exists bool
+	err := db.Pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM custom_domains WHERE domain = $1 AND verified = true)
+	`, domain).Scan(&exists)
+	return exists, err
+}
+
 // Page Views (analytics)
 
 func (db *DB) InsertPageView(ctx context.Context, userID int64, slug, ipHash, referrer string, isBot bool) error {

@@ -14,6 +14,9 @@ COPY migrations/ ./migrations/
 # Copy migrations into embed path
 COPY migrations/ ./api/cmd/server/migrations/
 
+# Copy shell.html into embed path
+COPY web/public/p/shell.html ./api/cmd/server/shell.html
+
 # Build
 RUN cd api && CGO_ENABLED=0 GOOS=linux go build -o /server ./cmd/server
 
