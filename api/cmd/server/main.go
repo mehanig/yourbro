@@ -151,6 +151,61 @@ func main() {
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.RealIP)
 
+	// Custom domain shell serving: host-based routing middleware.
+	// Requests with a Host header that isn't the API domain are served as custom domain pages.
+	// Must be registered before any routes.
+	apiURL := getEnv("API_URL", "https://api.yourbro.ai")
+	apiHost := getEnv("API_HOST", "api.yourbro.ai")
+	var validSlugRe = regexp.MustCompile(`^[a-z0-9-]+$`)
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			host := strings.ToLower(r.Host)
+			if i := strings.LastIndex(host, ":"); i != -1 {
+				host = host[:i]
+			}
+
+			// Known API hosts pass through to normal routing
+			if host == apiHost || host == "localhost" || host == "127.0.0.1" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Custom domain — look up in DB
+			cd, username, err := db.GetCustomDomainByHost(r.Context(), host)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+
+			path := strings.TrimPrefix(r.URL.Path, "/")
+			path = strings.TrimSuffix(path, "/")
+			slug := path
+
+			if slug == "" {
+				if cd.DefaultSlug == "" {
+					http.NotFound(w, r)
+					return
+				}
+				slug = cd.DefaultSlug
+			}
+
+			if !validSlugRe.MatchString(slug) {
+				http.NotFound(w, r)
+				return
+			}
+
+			apiURLJSON, _ := json.Marshal(apiURL)
+			usernameJSON, _ := json.Marshal(username)
+			html := shellHTML
+			html = strings.Replace(html, "'/*YOURBRO_API_URL*/'", string(apiURLJSON), 1)
+			html = strings.Replace(html, "'/*YOURBRO_CUSTOM_USER*/'", string(usernameJSON), 1)
+
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			w.Write([]byte(html))
+		})
+	})
+
 	frontendURL := getEnv("FRONTEND_URL", "http://localhost:5173")
 
 	// Restrictive CORS for authenticated routes
@@ -268,7 +323,6 @@ func main() {
 
 	// Public page endpoints — E2E encrypted, no auth required.
 	// Permissive CORS: these are cookie-free, safe to open to all origins.
-	var validSlugRe = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 	writeNotFound := func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "application/json")
@@ -598,59 +652,6 @@ func main() {
 				r.Put("/{id}", customDomainsHandler.Update)
 				r.Delete("/{id}", customDomainsHandler.Delete)
 			})
-		})
-	})
-
-	// Custom domain shell serving: host-based routing middleware.
-	// Requests with a Host header that isn't the API domain are served as custom domain pages.
-	apiURL := getEnv("API_URL", "https://api.yourbro.ai")
-	apiHost := getEnv("API_HOST", "api.yourbro.ai")
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			host := strings.ToLower(r.Host)
-			if i := strings.LastIndex(host, ":"); i != -1 {
-				host = host[:i]
-			}
-
-			// Known API hosts pass through to normal routing
-			if host == apiHost || host == "localhost" || host == "127.0.0.1" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Custom domain — look up in DB
-			cd, username, err := db.GetCustomDomainByHost(r.Context(), host)
-			if err != nil {
-				http.NotFound(w, r)
-				return
-			}
-
-			path := strings.TrimPrefix(r.URL.Path, "/")
-			path = strings.TrimSuffix(path, "/")
-			slug := path
-
-			if slug == "" {
-				if cd.DefaultSlug == "" {
-					http.NotFound(w, r)
-					return
-				}
-				slug = cd.DefaultSlug
-			}
-
-			if !validSlugRe.MatchString(slug) {
-				http.NotFound(w, r)
-				return
-			}
-
-			apiURLJSON, _ := json.Marshal(apiURL)
-			usernameJSON, _ := json.Marshal(username)
-			html := shellHTML
-			html = strings.Replace(html, "'/*YOURBRO_API_URL*/'", string(apiURLJSON), 1)
-			html = strings.Replace(html, "'/*YOURBRO_CUSTOM_USER*/'", string(usernameJSON), 1)
-
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("Cache-Control", "public, max-age=300")
-			w.Write([]byte(html))
 		})
 	})
 
