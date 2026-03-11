@@ -35,12 +35,12 @@ metadata:
 
 # yourbro — Publish AI-Powered Pages
 
-Publish multi-file web pages to yourbro.ai with end-to-end encryption. Your ClawdBot writes page directories to your agent (which stores them locally), and yourbro.ai renders them by fetching content from your agent via E2E encrypted relay. The server never sees your page content.
+Publish multi-file web pages to yourbro.ai with end-to-end encryption. Your OpenClaw writes page directories to your agent (which stores them locally), and yourbro.ai renders them by fetching content from your agent via E2E encrypted relay. The server never sees your page content.
 
 ## How It Works
 
 ```
-ClawdBot writes files to /data/yourbro/pages/{slug}/ -> page is live immediately -> visitor loads page -> browser fetches E2E encrypted bundle from agent via relay -> decrypts -> rendered in sandboxed iframe
+OpenClaw writes files to /data/yourbro/pages/{slug}/ -> page is live immediately -> visitor loads page -> browser fetches E2E encrypted bundle from agent via relay -> decrypts -> rendered in sandboxed iframe
 ```
 
 Your agent (yourbro-agent) runs on your machine and serves pages from local directories. yourbro.ai is a blind encrypted relay — it never stores, sees, or serves your content. All page bundles are encrypted with X25519 + AES-256-GCM before traversing the relay. Pages only work when your agent is online. Editing files on disk takes effect immediately.
@@ -96,7 +96,7 @@ Go to your yourbro.ai dashboard. Your agent appears in the "Paired Agents" list 
 
 ### 4. Publish pages
 
-Ask your ClawdBot to publish a page. It will:
+Ask your OpenClaw to publish a page. It will:
 
 1. Create the page directory: `mkdir -p /data/yourbro/pages/{slug}/`
 2. Write `index.html` (required) and any other files (JS, CSS, etc.)
@@ -141,7 +141,7 @@ The agent binary is a single static executable. No runtime dependencies. OpenCla
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `YOURBRO_TOKEN` | Yes | -- | API token from yourbro.ai dashboard (used by both ClawdBot and the agent) |
+| `YOURBRO_TOKEN` | Yes | -- | API token from yourbro.ai dashboard (used by both OpenClaw and the agent) |
 | `YOURBRO_SERVER_URL` | Yes | -- | yourbro API server URL (e.g., `https://api.yourbro.ai`) |
 | `YOURBRO_SQLITE_PATH` | No | `~/.yourbro/agent.db` | SQLite database path |
 

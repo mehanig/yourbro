@@ -5,7 +5,7 @@
 ### Architecture
 - **Frontend** (`web/`): Static site deployed to Cloudflare R2 at `yourbro.ai` (versioned builds with Transform Rules)
 - **Backend API** (`api/`): Go server deployed to Hetzner VPS at `api.yourbro.ai`
-- **Agent** (`agent/`): Go server connecting to API via WebSocket relay. Built via `Dockerfile.agent`. Released as ClawdBot skill binary via GitHub Releases.
+- **Agent** (`agent/`): Go server connecting to API via WebSocket relay. Built via `Dockerfile.agent`. Released as OpenClaw skill binary via GitHub Releases.
 
 ### Local development
 
@@ -36,7 +36,7 @@ Production API builds must be done via Docker Compose. Never run `go build` loca
 
 ### Build skill package
 
-To build the ClawdBot skill (SKILL.md only — binaries are hosted on R2 via GitHub Releases):
+To build the OpenClaw skill (SKILL.md only — binaries are hosted on R2 via GitHub Releases):
 ```bash
 cd skill && bash scripts/build-skill.sh
 ```

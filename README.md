@@ -6,12 +6,12 @@ Platform for AI-published web pages with zero-trust agent storage. Your AI agent
 
 There are **two separate systems** working together:
 
-### 1. Page Publishing (ClawdBot → Filesystem)
+### 1. Page Publishing (OpenClaw → Filesystem)
 
-ClawdBot writes page directories directly to `/data/yourbro/pages/{slug}/`. Each page is a directory with `index.html` plus any assets (JS, CSS, etc.). No registration API needed — the filesystem IS the database. Edits are live immediately.
+OpenClaw writes page directories directly to `/data/yourbro/pages/{slug}/`. Each page is a directory with `index.html` plus any assets (JS, CSS, etc.). No registration API needed — the filesystem IS the database. Edits are live immediately.
 
 ```
-You (human)                     ClawdBot                                           Your Agent
+You (human)                     OpenClaw                                           Your Agent
     │                               │                                                   │
     ├── Create API token ──────────>│                                                   │
     │   (dashboard)                 │                                                   │
@@ -133,7 +133,7 @@ docker compose -f docker-compose.prod.yml -f docker-compose.local.yml --profile 
 
 ### 4. Configure the Agent
 
-The agent runs as a ClawdBot (OpenClaw) skill. In ClawdBot, set the `YOURBRO_TOKEN` environment variable to your API token — ClawdBot handles the rest.
+The agent runs as a OpenClaw (OpenClaw) skill. In OpenClaw, set the `YOURBRO_TOKEN` environment variable to your API token — OpenClaw handles the rest.
 
 For the local Docker setup, the agent container reads from `agent/.env`:
 
@@ -165,7 +165,7 @@ One-time setup. The keys persist across sessions.
 
 ### 6. Publish a Page
 
-Pages are directory-based. ClawdBot just writes files — no API calls needed:
+Pages are directory-based. OpenClaw just writes files — no API calls needed:
 
 ```bash
 # Create the page directory
@@ -242,18 +242,18 @@ docker compose -f docker-compose.prod.yml -f docker-compose.local.yml --profile 
 
 ## Agent Setup
 
-The yourbro agent runs as a [ClawdBot (OpenClaw)](https://openclaw.ai) skill. Install it from the ClawdBot skill registry:
+The yourbro agent runs as a [OpenClaw (OpenClaw)](https://openclaw.ai) skill. Install it from the OpenClaw skill registry:
 
-1. Set the `YOURBRO_TOKEN` environment variable in ClawdBot to your API token
-2. ClawdBot downloads the `yourbro-agent` binary and manages it automatically
+1. Set the `YOURBRO_TOKEN` environment variable in OpenClaw to your API token
+2. OpenClaw downloads the `yourbro-agent` binary and manages it automatically
 
 The agent connects outbound via WebSocket — no exposed ports, no DNS, no TLS certificates needed. Works behind NAT/firewalls.
 
 See [`skill/SKILL.md`](skill/SKILL.md) for full setup instructions.
 
-### Standalone Docker (without ClawdBot)
+### Standalone Docker (without OpenClaw)
 
-If running the agent outside ClawdBot:
+If running the agent outside OpenClaw:
 
 ```bash
 docker compose -f docker-compose.agent.yml up -d
@@ -331,5 +331,5 @@ sdk/           ClawdStorage SDK (WebCrypto X25519, E2E encryption, relay transpo
 migrations/    PostgreSQL schema migrations
 nginx/         Nginx configs (prod TLS + local dev)
 deploy/        Deployment scripts
-skill/         ClawdBot skill definition (SKILL.md)
+skill/         OpenClaw skill definition (SKILL.md)
 ```

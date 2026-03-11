@@ -22,7 +22,7 @@ MDN explicitly warns: "it is strongly discouraged to use both allow-scripts and 
 ## Why accepted
 
 - Page content comes from the user's own agent running on their own machine
-- Content is written by ClawdBot (the user's AI assistant)
+- Content is written by OpenClaw (the user's AI assistant)
 - The trust boundary is the agent itself — if the agent is compromised, there are bigger problems
 - Page bundles are E2E encrypted in transit (X25519 ECDH + AES-256-GCM) — the relay server cannot read or inject content
 

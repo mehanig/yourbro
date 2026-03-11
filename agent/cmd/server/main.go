@@ -85,7 +85,7 @@ func main() {
 	// Key revocation — via E2E encrypted relay (relay router injects key_id into context)
 	r.Post("/api/revoke-key", pairHandler.RevokeKey)
 
-	// Page routes — read-only via relay. Pages are created by ClawdBot internally.
+	// Page routes — read-only via relay. Pages are created by OpenClaw internally.
 	// Unified handler: paired users → any page, anonymous → public:true only.
 	r.Get("/api/pages", pagesHandler.List)
 	r.Get("/api/page/{slug}", pagesHandler.Get)
