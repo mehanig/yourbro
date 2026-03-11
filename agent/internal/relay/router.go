@@ -15,14 +15,16 @@ import (
 
 	"github.com/mehanig/yourbro/agent/internal/e2e"
 	"github.com/mehanig/yourbro/agent/internal/handlers"
+	"github.com/mehanig/yourbro/agent/internal/identity"
 	"github.com/mehanig/yourbro/agent/internal/storage"
 )
 
 // Router adapts relay messages to http.Handler calls.
 type Router struct {
-	Mux          http.Handler
-	AgentPrivKey *ecdh.PrivateKey // nil = E2E disabled
-	DB           *storage.DB     // for looking up user X25519 keys
+	Mux              http.Handler
+	AgentPrivKey     *ecdh.PrivateKey    // nil = E2E disabled
+	DB               *storage.DB         // for looking up user X25519 keys
+	IdentityVerifier *identity.Verifier  // nil = identity tokens not verified
 }
 
 // HandleRequest converts a relay Request into an http.Request, routes it
@@ -74,6 +76,23 @@ func (r *Router) handleEncryptedRequest(ctx context.Context, req Request) Respon
 	// Inject key_id into context so handlers can identify the user
 	if req.KeyID != "" {
 		ctx = handlers.WithKeyID(ctx, req.KeyID)
+	}
+
+	// Layer 1: Extract and verify identity token (email proof via API-signed Ed25519 JWT)
+	if r.IdentityVerifier != nil {
+		if tokenStr, ok := innerReq.Headers["X-Identity-Token"]; ok && tokenStr != "" {
+			claims, err := r.IdentityVerifier.Verify(tokenStr)
+			if err == nil {
+				ctx = handlers.WithIdentityEmail(ctx, claims.Email)
+			} else {
+				log.Printf("E2E: identity token verification failed (non-fatal): %v", err)
+			}
+		}
+	}
+
+	// Layer 2: Extract access code (server-blind per-page secret)
+	if code, ok := innerReq.Headers["X-Access-Code"]; ok && code != "" {
+		ctx = handlers.WithAccessCode(ctx, code)
 	}
 
 	// Process the cleartext request

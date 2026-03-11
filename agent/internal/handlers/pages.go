@@ -1,9 +1,13 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"io/fs"
+	"log"
+	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,20 +19,27 @@ import (
 
 var validSlug = regexp.MustCompile(`^[a-z0-9-]+$`)
 
+// Ambiguity-free charset: no 0/O/1/I
+const accessCodeChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
 type PagesHandler struct {
 	PagesDir string
 	DB       interface{ IsX25519KeyAuthorized(keyID string) (string, bool) }
 }
 
 type pageMeta struct {
-	Title  string `json:"title"`
-	Public bool   `json:"public"`
+	Title         string   `json:"title"`
+	Public        bool     `json:"public"`
+	AllowedEmails []string `json:"allowed_emails,omitempty"`
+	AccessCode    string   `json:"access_code,omitempty"`
 }
 
 type pageSummary struct {
-	Slug   string `json:"slug"`
-	Title  string `json:"title"`
-	Public bool   `json:"public"`
+	Slug          string   `json:"slug"`
+	Title         string   `json:"title"`
+	Public        bool     `json:"public"`
+	Shared        bool     `json:"shared"`
+	AllowedEmails []string `json:"allowed_emails,omitempty"`
 }
 
 type pageBundle struct {
@@ -36,6 +47,15 @@ type pageBundle struct {
 	Title  string            `json:"title"`
 	Public bool              `json:"public"`
 	Files  map[string]string `json:"files"`
+}
+
+func (m *pageMeta) isEmailAllowed(email string) bool {
+	for _, e := range m.AllowedEmails {
+		if strings.EqualFold(e, email) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *PagesHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +84,13 @@ func (h *PagesHandler) List(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		meta := readPageMeta(h.PagesDir, slug)
-		pages = append(pages, pageSummary{Slug: slug, Title: meta.Title, Public: meta.Public})
+		pages = append(pages, pageSummary{
+			Slug:          slug,
+			Title:         meta.Title,
+			Public:        meta.Public,
+			Shared:        len(meta.AllowedEmails) > 0,
+			AllowedEmails: meta.AllowedEmails,
+		})
 	}
 
 	if pages == nil {
@@ -157,18 +183,42 @@ func (h *PagesHandler) buildBundle(slug string) (*pageBundle, int) {
 	}, http.StatusOK
 }
 
-// Get serves a page bundle. Access control is based on context key_id:
-// paired user (key_id in authorized_keys) → any page; anonymous → public:true only.
+// Get serves a page bundle. Access control tiers:
+//  1. Paired user (key_id in authorized_keys) -> any page
+//  2. Shared page: verified email in allowed_emails AND correct access_code
+//  3. Public page (public:true) -> anyone
 func (h *PagesHandler) Get(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
-	isPaired := h.isPairedUser(KeyIDFromRequest(r))
+	keyID := KeyIDFromRequest(r)
 	meta := readPageMeta(h.PagesDir, slug)
 
-	if !isPaired && !meta.Public {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "page not found"})
+	// Tier 1: Paired user -> any page
+	if h.isPairedUser(keyID) {
+		h.servePage(w, slug)
 		return
 	}
 
+	// Tier 2: Shared page — requires BOTH email match AND correct access code
+	if len(meta.AllowedEmails) > 0 && meta.AccessCode != "" {
+		email := IdentityEmailFromRequest(r)
+		code := AccessCodeFromRequest(r)
+		if email != "" && meta.isEmailAllowed(email) &&
+			subtle.ConstantTimeCompare([]byte(code), []byte(meta.AccessCode)) == 1 {
+			h.servePage(w, slug)
+			return
+		}
+	}
+
+	// Tier 3: Public page -> anyone
+	if meta.Public {
+		h.servePage(w, slug)
+		return
+	}
+
+	writeJSON(w, http.StatusNotFound, map[string]string{"error": "page not found"})
+}
+
+func (h *PagesHandler) servePage(w http.ResponseWriter, slug string) {
 	bundle, status := h.buildBundle(slug)
 	if bundle == nil {
 		writeJSON(w, status, map[string]string{"error": "page not found"})
@@ -186,9 +236,11 @@ func (h *PagesHandler) isPairedUser(keyID string) bool {
 	return ok
 }
 
-// readPageMeta reads page.json metadata (title, public flag). Falls back to slug for title.
+// readPageMeta reads page.json metadata. Falls back to slug for title.
+// Auto-generates access_code when allowed_emails is set but no code exists.
 func readPageMeta(pagesDir, slug string) pageMeta {
-	data, err := os.ReadFile(filepath.Join(pagesDir, slug, "page.json"))
+	metaPath := filepath.Join(pagesDir, slug, "page.json")
+	data, err := os.ReadFile(metaPath)
 	if err != nil {
 		return pageMeta{Title: slug}
 	}
@@ -196,5 +248,33 @@ func readPageMeta(pagesDir, slug string) pageMeta {
 	if json.Unmarshal(data, &meta) != nil || meta.Title == "" {
 		meta.Title = slug
 	}
+
+	// Auto-generate access code when allowed_emails is set but no code exists
+	if len(meta.AllowedEmails) > 0 && meta.AccessCode == "" {
+		meta.AccessCode = generateAccessCode()
+		// Write back to page.json
+		if updated, err := json.MarshalIndent(meta, "", "  "); err == nil {
+			if err := os.WriteFile(metaPath, updated, 0644); err == nil {
+				log.Printf("=== ACCESS CODE for page %q: %s ===", slug, meta.AccessCode)
+				log.Printf("Share this code with invited viewers.")
+			}
+		}
+	}
+
 	return meta
+}
+
+// generateAccessCode creates an 8-character code from an ambiguity-free charset.
+func generateAccessCode() string {
+	code := make([]byte, 8)
+	for i := range code {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(accessCodeChars))))
+		if err != nil {
+			// crypto/rand should never fail; fall back to a known value
+			code[i] = accessCodeChars[0]
+			continue
+		}
+		code[i] = accessCodeChars[n.Int64()]
+	}
+	return string(code)
 }

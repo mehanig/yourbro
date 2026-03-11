@@ -1,4 +1,6 @@
+import { useState } from "react";
 import type { Page, PageAnalytics } from "../lib/api";
+import { SharedEmailsPopup } from "./SharedEmailsPopup";
 
 export function PageCard({
   page,
@@ -17,6 +19,8 @@ export function PageCard({
   onDelete: (slug: string, agentId: string) => void;
   duplicateWarning?: string;
 }) {
+  const [showEmails, setShowEmails] = useState(false);
+
   let statsText = "";
   if (page.public) {
     if (stats && stats.total_views > 0) {
@@ -30,6 +34,8 @@ export function PageCard({
       statsText = "0 views";
     }
   }
+
+  const emailCount = page.allowed_emails?.length ?? 0;
 
   return (
     <div className="yb-dash-item">
@@ -54,7 +60,7 @@ export function PageCard({
           >
             {page.title || page.slug}
           </a>
-          {page.public && (
+          {page.public ? (
             <span
               style={{
                 color: "#3fb950",
@@ -65,6 +71,40 @@ export function PageCard({
               }}
             >
               public
+            </span>
+          ) : page.shared ? (
+            <span style={{ position: "relative" }}>
+              <span
+                style={{
+                  color: "#d2a8ff",
+                  fontSize: "0.75rem",
+                  background: "#2d1f3d",
+                  padding: "0.1rem 0.4rem",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                }}
+                onClick={() => setShowEmails(!showEmails)}
+              >
+                shared ({emailCount})
+              </span>
+              {showEmails && page.allowed_emails && (
+                <SharedEmailsPopup
+                  emails={page.allowed_emails}
+                  onClose={() => setShowEmails(false)}
+                />
+              )}
+            </span>
+          ) : (
+            <span
+              style={{
+                color: "#8b949e",
+                fontSize: "0.75rem",
+                background: "#1c1f23",
+                padding: "0.1rem 0.4rem",
+                borderRadius: 4,
+              }}
+            >
+              private
             </span>
           )}
           {duplicateWarning && (

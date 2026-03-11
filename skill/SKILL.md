@@ -100,14 +100,24 @@ Ask your OpenClaw to publish a page. It will:
 
 1. Create the page directory: `mkdir -p /data/yourbro/pages/{slug}/`
 2. Write `index.html` (required) and any other files (JS, CSS, etc.)
-3. Optionally write `page.json` with `{"title": "My Page", "public": false}` for a custom title and visibility control
+3. Optionally write `page.json` for title, visibility, and sharing: `{"title": "My Page", "public": false}` or `{"title": "My Page", "allowed_emails": ["friend@gmail.com"]}` for shared access
 4. The page goes live at `https://yourbro.ai/p/USERNAME/SLUG` (or `https://CUSTOM_DOMAIN/SLUG` if configured)
 
 To update a page, just edit the files — changes are live immediately. To delete a page, remove the directory. No API calls needed.
 
-### Page Visibility (Public vs Private)
+### Page Access Control
 
-Pages are **private by default**. Only the page owner (authenticated + paired browser) can view private pages via E2E encryption.
+Pages support three access levels:
+
+- **Private** (default): Only paired users (page owner) can view
+- **Shared**: Specific Google accounts can view (requires access code)
+- **Public**: Anyone with the link can view
+
+#### Private pages (default)
+
+If `page.json` is missing or has no `"public"` field, the page defaults to **private**. Only the page owner (authenticated + paired browser) can view it via E2E encryption.
+
+#### Public pages
 
 To make a page public (viewable by anyone with the link, no account needed):
 
@@ -121,9 +131,42 @@ To make it private again:
 echo '{"title": "My Portfolio", "public": false}' > /data/yourbro/pages/my-page/page.json
 ```
 
-If `page.json` is missing or has no `"public"` field, the page defaults to **private**.
+#### Shared pages (email + access code)
 
-All pages (public and private) are served through E2E encryption — anonymous visitors generate ephemeral X25519 keys. Public pages do not have access to page storage. The agent must still be online to serve public pages.
+To share a page with specific people by their Google account email:
+
+```bash
+cat > /data/yourbro/pages/my-page/page.json << 'EOF'
+{"title": "My Page", "allowed_emails": ["friend@gmail.com", "coworker@company.com"]}
+EOF
+```
+
+The agent auto-generates an 8-character `access_code` in `page.json` and logs it:
+
+```
+=== ACCESS CODE for page "my-page": A7X3KP9M ===
+Share this code with invited viewers.
+```
+
+Send the URL and access code to your invitees:
+- **URL**: `https://yourbro.ai/p/USERNAME/my-page`
+- **Code**: `A7X3KP9M`
+
+Invitees must be logged in to yourbro.ai with the matching Google account. They enter the code once — the browser remembers it.
+
+**Why two factors?** The email check proves identity (verified by yourbro.ai's Google OAuth). The access code is a secret only you and your invitees know — it never leaves the E2E encrypted channel, so even a compromised server can't access your shared pages.
+
+You can also set the access code explicitly:
+
+```bash
+cat > /data/yourbro/pages/my-page/page.json << 'EOF'
+{"title": "My Page", "allowed_emails": ["friend@gmail.com"], "access_code": "MYCUSTOMCODE"}
+EOF
+```
+
+To revoke access, either remove the email from `allowed_emails` or change the `access_code` (existing viewers will need the new code).
+
+All pages (public, shared, and private) are served through E2E encryption — anonymous visitors generate ephemeral X25519 keys. The agent must still be online to serve any page.
 
 ## File Locations
 
@@ -132,7 +175,7 @@ All pages (public and private) are served through E2E encryption — anonymous v
 | `yourbro-agent` | Agent binary (installed by OpenClaw to `~/.openclaw/tools/yourbro/`) |
 | `/data/yourbro/pages/` | Page directories — each page is a folder with `index.html` + assets |
 | `/data/yourbro/pages/{slug}/index.html` | Required entry point for each page |
-| `/data/yourbro/pages/{slug}/page.json` | Optional metadata: `{"title": "Page Title", "public": false}`. Set `"public": true` to make the page viewable by anyone without authentication. |
+| `/data/yourbro/pages/{slug}/page.json` | Optional metadata: `{"title": "...", "public": false, "allowed_emails": [...], "access_code": "..."}`. Controls title, visibility, and shared access. |
 | `~/.yourbro/agent.db` | SQLite database (agent identity, authorized keys, page storage) |
 
 The agent binary is a single static executable. No runtime dependencies. OpenClaw downloads the correct platform binary (darwin/arm64, darwin/amd64, linux/amd64, linux/arm64) from GitHub Releases via the install URLs in the metadata above.
@@ -235,6 +278,20 @@ EOF
 
 echo '{"title": "Dashboard"}' > /data/yourbro/pages/dashboard/page.json
 ```
+
+### Shared page (specific users only)
+
+```bash
+mkdir -p /data/yourbro/pages/team-report/
+cat > /data/yourbro/pages/team-report/index.html << 'EOF'
+<!DOCTYPE html><html><body><h1>Q1 Report</h1><p>Confidential</p></body></html>
+EOF
+cat > /data/yourbro/pages/team-report/page.json << 'EOF'
+{"title": "Q1 Report", "allowed_emails": ["alice@company.com", "bob@company.com"]}
+EOF
+```
+
+The agent auto-generates an access code and logs it. Share the URL and code with Alice and Bob — they log in to yourbro.ai, visit the page, and enter the code once.
 
 ### Update an existing page
 

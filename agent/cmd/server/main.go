@@ -18,6 +18,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/mehanig/yourbro/agent/internal/handlers"
+	"github.com/mehanig/yourbro/agent/internal/identity"
 	mw "github.com/mehanig/yourbro/agent/internal/middleware"
 	"github.com/mehanig/yourbro/agent/internal/relay"
 	"github.com/mehanig/yourbro/agent/internal/storage"
@@ -135,7 +136,17 @@ func main() {
 		}
 	}()
 
-	router := &relay.Router{Mux: r, AgentPrivKey: agentPrivKey, DB: db}
+	// Initialize identity token verifier (fetches JWKS from API)
+	var identityVerifier *identity.Verifier
+	idv, err := identity.NewVerifier(serverURL)
+	if err != nil {
+		log.Printf("Identity verifier not available (shared pages won't work): %v", err)
+	} else {
+		identityVerifier = idv
+		log.Printf("Identity verifier initialized (JWKS from %s)", serverURL)
+	}
+
+	router := &relay.Router{Mux: r, AgentPrivKey: agentPrivKey, DB: db, IdentityVerifier: identityVerifier}
 	client := &relay.Client{
 		ServerURL:    serverURL,
 		APIToken:     apiToken,

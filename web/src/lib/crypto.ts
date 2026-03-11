@@ -13,18 +13,25 @@ export interface StoredX25519Keypair {
   publicKeyBytes: Uint8Array;
 }
 
+const ACCESS_CODES_STORE = "access-codes";
+
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    // Version 3: fresh schema — stores raw bytes instead of CryptoKey (Safari compat)
-    const req = indexedDB.open(DB_NAME, 3);
-    req.onupgradeneeded = () => {
+    // Version 4: adds access-codes store for shared page access codes
+    const req = indexedDB.open(DB_NAME, 4);
+    req.onupgradeneeded = (event) => {
       const db = req.result;
-      // Delete old stores and recreate fresh
-      for (const name of Array.from(db.objectStoreNames)) {
-        db.deleteObjectStore(name);
+      if ((event as IDBVersionChangeEvent).oldVersion < 3) {
+        // Fresh install or upgrade from very old version — recreate all stores
+        for (const name of Array.from(db.objectStoreNames)) {
+          db.deleteObjectStore(name);
+        }
+        db.createObjectStore(X25519_STORE);
+        db.createObjectStore(AGENT_KEYS_STORE);
       }
-      db.createObjectStore(X25519_STORE);
-      db.createObjectStore(AGENT_KEYS_STORE);
+      if (!db.objectStoreNames.contains(ACCESS_CODES_STORE)) {
+        db.createObjectStore(ACCESS_CODES_STORE);
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);

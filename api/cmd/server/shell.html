@@ -16,6 +16,24 @@
         }
         .status-msg a { color: #3b82f6; margin-top: 8px; }
         .status-msg .subtitle { font-size: 14px; color: #555; margin-top: 6px; }
+        .code-prompt {
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; height: 100vh; padding: 20px;
+        }
+        .code-prompt p { color: #888; font-size: 16px; margin-bottom: 16px; }
+        .code-prompt input {
+            background: #1a1a1a; border: 1px solid #333; color: #fafafa;
+            font-family: monospace; font-size: 24px; letter-spacing: 0.2em;
+            text-transform: uppercase; padding: 12px 16px; text-align: center;
+            width: 220px; border-radius: 6px; outline: none;
+        }
+        .code-prompt input:focus { border-color: #3b82f6; }
+        .code-prompt button {
+            margin-top: 12px; background: #3b82f6; color: #fff; border: none;
+            padding: 10px 32px; border-radius: 6px; font-size: 15px; cursor: pointer;
+        }
+        .code-prompt button:hover { background: #2563eb; }
+        .code-prompt .error { color: #ef4444; font-size: 13px; margin-top: 8px; }
     </style>
 </head>
 <body>
@@ -76,6 +94,7 @@
 
             // Render page: convert all assets to data URIs, load via srcdoc in sandboxed iframe
             async function renderPage(pageData) {
+                document.body.innerHTML = '';
                 var pageTitle = pageData.title || slug;
                 document.title = pageTitle + ' \u2014 yourbro';
 
@@ -166,12 +185,17 @@
             var x25519PubBytes = null; // Uint8Array
             try {
                 var idb = await new Promise(function(res, rej) {
-                    var req = indexedDB.open('clawd-keys', 3);
-                    req.onupgradeneeded = function() {
+                    var req = indexedDB.open('clawd-keys', 4);
+                    req.onupgradeneeded = function(event) {
                         var d = req.result;
-                        for (var n of Array.from(d.objectStoreNames)) d.deleteObjectStore(n);
-                        d.createObjectStore('x25519');
-                        d.createObjectStore('agent-keys');
+                        if (event.oldVersion < 3) {
+                            for (var n of Array.from(d.objectStoreNames)) d.deleteObjectStore(n);
+                            d.createObjectStore('x25519');
+                            d.createObjectStore('agent-keys');
+                        }
+                        if (!d.objectStoreNames.contains('access-codes')) {
+                            d.createObjectStore('access-codes');
+                        }
                     };
                     req.onsuccess = function() { res(req.result); };
                     req.onerror = function() { rej(req.error); };
@@ -315,20 +339,99 @@
                 return JSON.parse(new TextDecoder().decode(decrypted));
             }
 
-            // 4. Fetch page bundle via E2E encrypted relay
-            var pageData = null;
+            // 4. Fetch identity token (best-effort — fails silently for anonymous viewers)
+            var identityToken = null;
             try {
-                var innerResp = await encryptedRelay({
-                    id: crypto.randomUUID(),
-                    method: 'GET',
-                    path: '/api/page/' + encodeURIComponent(slug)
-                });
-                if (innerResp && innerResp.status === 200 && innerResp.body) {
-                    pageData = JSON.parse(innerResp.body);
+                var idResp = await fetch((API || '') + '/api/identity-token', { credentials: 'include' });
+                if (idResp.ok) {
+                    var idData = await idResp.json();
+                    identityToken = idData.token;
                 }
             } catch(e) {
-                _dbg += 'E2E fetch error: ' + e.message + '\n';
-                console.error('E2E page fetch failed:', e);
+                _dbg += 'identity-token fetch skipped: ' + e.message + '\n';
+            }
+
+            // Access code helpers — stored in IndexedDB per page (username/slug)
+            var acStoreKey = username + '/' + slug;
+            async function loadAccessCode() {
+                try {
+                    var tx = idb.transaction('access-codes', 'readonly');
+                    var req = tx.objectStore('access-codes').get(acStoreKey);
+                    return await new Promise(function(res) {
+                        req.onsuccess = function() { res(req.result || null); };
+                        req.onerror = function() { res(null); };
+                    });
+                } catch(e) { return null; }
+            }
+            async function saveAccessCode(code) {
+                try {
+                    var tx = idb.transaction('access-codes', 'readwrite');
+                    tx.objectStore('access-codes').put(code, acStoreKey);
+                } catch(e) {}
+            }
+
+            function promptAccessCode(errorMsg) {
+                return new Promise(function(resolve) {
+                    document.body.innerHTML = '';
+                    var div = document.createElement('div');
+                    div.className = 'code-prompt';
+                    div.innerHTML = '<p>This page requires an access code.</p>' +
+                        '<input type="text" maxlength="8" placeholder="Enter code" autofocus>' +
+                        '<button>Submit</button>' +
+                        (errorMsg ? '<div class="error">' + errorMsg + '</div>' : '');
+                    document.body.appendChild(div);
+                    var input = div.querySelector('input');
+                    var btn = div.querySelector('button');
+                    function submit() {
+                        var val = input.value.trim().toUpperCase();
+                        if (val) resolve(val);
+                    }
+                    btn.addEventListener('click', submit);
+                    input.addEventListener('keydown', function(e) { if (e.key === 'Enter') submit(); });
+                    input.focus();
+                });
+            }
+
+            // Build headers for inner relay request
+            function buildInnerHeaders() {
+                var h = {};
+                if (identityToken) h['X-Identity-Token'] = identityToken;
+                if (currentAccessCode) h['X-Access-Code'] = currentAccessCode;
+                return Object.keys(h).length > 0 ? h : undefined;
+            }
+
+            // 5. Fetch page bundle via E2E encrypted relay
+            var currentAccessCode = await loadAccessCode();
+            var pageData = null;
+            var fetchAttempts = 0;
+            var maxAttempts = 3;
+
+            while (!pageData && fetchAttempts < maxAttempts) {
+                fetchAttempts++;
+                try {
+                    var innerResp = await encryptedRelay({
+                        id: crypto.randomUUID(),
+                        method: 'GET',
+                        path: '/api/page/' + encodeURIComponent(slug),
+                        headers: buildInnerHeaders()
+                    });
+                    if (innerResp && innerResp.status === 200 && innerResp.body) {
+                        pageData = JSON.parse(innerResp.body);
+                        // Save working access code
+                        if (currentAccessCode) await saveAccessCode(currentAccessCode);
+                    }
+                } catch(e) {
+                    _dbg += 'E2E fetch error: ' + e.message + '\n';
+                    console.error('E2E page fetch failed:', e);
+                }
+
+                // If page fetch failed and user is logged in, prompt for access code
+                if (!pageData && identityToken) {
+                    var errMsg = fetchAttempts > 1 ? 'Invalid code. Try again.' : null;
+                    currentAccessCode = await promptAccessCode(errMsg);
+                } else {
+                    break;
+                }
             }
 
             if (!pageData || !pageData.files || !pageData.files['index.html']) {
@@ -359,12 +462,16 @@
                 });
 
                 try {
+                    var storageHeaders = { 'Content-Type': 'application/json' };
+                    if (identityToken) storageHeaders['X-Identity-Token'] = identityToken;
+                    if (currentAccessCode) storageHeaders['X-Access-Code'] = currentAccessCode;
+
                     var innerResp = await encryptedRelay({
                         id: crypto.randomUUID(),
                         method: 'POST',
                         path: '/api/page-storage/' + action,
                         body: btoa(unescape(encodeURIComponent(innerBody))),
-                        headers: { 'Content-Type': 'application/json' }
+                        headers: storageHeaders
                     });
 
                     var result = { ok: false };

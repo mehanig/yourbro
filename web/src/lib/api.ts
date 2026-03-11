@@ -56,6 +56,8 @@ export interface Page {
   slug: string;
   title: string;
   public: boolean;
+  shared: boolean;
+  allowed_emails?: string[];
   updated_at: string;
 }
 
