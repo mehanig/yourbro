@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -260,9 +261,26 @@ func main() {
 	// Identity bridge for cross-domain shared page auth.
 	// Served on api.yourbro.ai so the session cookie (Domain: .yourbro.ai) is same-origin.
 	// Custom domain shells load this in a hidden iframe to fetch identity tokens.
-	r.Get("/identity-bridge.html", func(w http.ResponseWriter, r *http.Request) {
+	// X-Frame-Options is set dynamically: only yourbro.ai and verified custom domains can embed it.
+	r.Get("/identity-bridge.html", func(w http.ResponseWriter, req *http.Request) {
+		referer := req.Header.Get("Referer")
+		allowed := false
+		if referer != "" {
+			if u, err := url.Parse(referer); err == nil {
+				host := u.Hostname()
+				if host == "yourbro.ai" || host == "localhost" || host == "127.0.0.1" {
+					allowed = true
+				} else if _, _, err := db.GetCustomDomainByHost(req.Context(), host); err == nil {
+					allowed = true
+				}
+			}
+		}
+		if !allowed {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("Cache-Control", "private, no-store")
 		w.Write([]byte(identityBridgeHTML))
 	})
 

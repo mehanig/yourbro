@@ -354,12 +354,9 @@
                     _dbg += 'identity-token fetch skipped: ' + e.message + '\n';
                 }
             } else {
-                // Custom domain — session cookie lives on yourbro.ai, so use a
-                // hidden iframe bridge on yourbro.ai to fetch the token same-origin.
+                // Custom domain — session cookie lives on yourbro.ai. Use a hidden
+                // iframe bridge on api.yourbro.ai (same cookie domain) to fetch the token.
                 try {
-                    // The bridge is served by the API at api.yourbro.ai.
-                    // The session cookie (Domain: .yourbro.ai) is available there, and
-                    // the fetch is same-origin — no CORS or third-party cookie issues.
                     var bridgeUrl = API + '/identity-bridge.html';
                     identityToken = await new Promise(function(resolve) {
                         var timeout = setTimeout(function() { resolve(null); }, 5000);

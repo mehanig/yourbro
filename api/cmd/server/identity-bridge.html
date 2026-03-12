@@ -3,16 +3,22 @@
 <body>
 <script>
 (function() {
+    // Only respond if loaded in an iframe with a valid referrer
+    if (!parent || parent === window) return;
+    var parentOrigin = null;
+    try { parentOrigin = document.referrer ? new URL(document.referrer).origin : null; } catch(e) {}
+    if (!parentOrigin) return;
+
     fetch('/api/identity-token', { credentials: 'include' })
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(data) {
             parent.postMessage({
                 type: 'yourbro-identity',
                 token: data && data.token ? data.token : null
-            }, '*');
+            }, parentOrigin);
         })
         .catch(function() {
-            parent.postMessage({ type: 'yourbro-identity', token: null }, '*');
+            parent.postMessage({ type: 'yourbro-identity', token: null }, parentOrigin);
         });
 })();
 </script>
