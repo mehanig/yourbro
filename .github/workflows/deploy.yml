@@ -131,6 +131,7 @@ jobs:
             ensure_env COOKIE_DOMAIN 'yourbro.ai'
             ensure_env CF_ZONE_ID '${{ secrets.CLOUDFLARE_ZONE_ID }}'
             ensure_env CF_API_TOKEN '${{ secrets.CLOUDFLARE_API_TOKEN }}'
+            ensure_env IDENTITY_SIGNING_KEY '${{ secrets.IDENTITY_SIGNING_KEY }}'
 
             # Update redirect URL for API subdomain (ensure_env won't update existing values)
             sed -i "s|GOOGLE_REDIRECT_URL=.*|GOOGLE_REDIRECT_URL=https://api.yourbro.ai/auth/google/callback|" "$ENV_FILE"
