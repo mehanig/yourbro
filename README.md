@@ -89,6 +89,49 @@ Browser              api.yourbro.ai          Your Agent
    Server is a relay pipe — it never sees plaintext (E2E encrypted).
 ```
 
+### Shared Pages & Custom Domain Authentication
+
+Shared pages require a verified Google identity. On `yourbro.ai`, the shell fetches an identity token directly (session cookie is same-origin). On custom domains, the session cookie belongs to `.yourbro.ai` and isn't available, so the shell uses an **auth bridge redirect** to propagate the session:
+
+```
+FIRST VISIT (custom domain, not authenticated on this domain):
+
+Browser                     api.yourbro.ai                        Custom Domain
+   │                            │                                       │
+   │── GET clicktof.art/slug ──>│ (custom domain middleware)            │
+   │<── shell.html ─────────────│                                       │
+   │                            │                                       │
+   │── GET /api/identity-token ─┼─ 401 (no cookie on custom domain)     │
+   │── E2E relay ──────────────>│──> agent returns login_required       │
+   │                            │                                       │
+   │── redirect to ────────────>│                                       │
+   │   /auth/bridge?return=     │── has .yourbro.ai session cookie      │
+   │   clicktof.art/slug        │── verifies custom domain is legit     │
+   │                            │── generates one-time session code     │
+   │<── redirect ───────────────│                                       │
+   │                            │                                       │
+   │── GET /auth/session?code=..┼──────────────────────────────────────>│
+   │                            │   validates code                      │
+   │                            │   sets yb_session cookie on           │
+   │                            │   clicktof.art (7 days)               │
+   │<── redirect to /slug ──────┼───────────────────────────────────────│
+   │                            │                                       │
+   │── GET /api/identity-token ─┼─ 200 (cookie now present)             │
+   │── E2E relay with token ───>│──> agent verifies email + code ──> OK │
+
+SUBSEQUENT VISITS (cookie set, valid for 7 days):
+
+Browser                     Custom Domain
+   │── GET clicktof.art/slug ──>│
+   │<── shell.html ─────────────│
+   │── GET /api/identity-token ─│ 200 (cookie present)
+   │── E2E relay ──────────────>│ agent verifies → page loads
+```
+
+Custom domains pass through `/api/` routes to the API server (they CNAME to it). The auth bridge verifies the return URL is a verified custom domain before issuing a session code.
+
+If the user is not logged in to yourbro.ai at all, the auth bridge redirects to Google OAuth first, then completes the bridge flow — seamless single sign-on.
+
 ### Zero-Trust Guarantees
 
 - **Server DB dump** → only public keys + page metadata, zero user data
@@ -180,7 +223,15 @@ EOF
 echo '{"title": "Hello World", "public": true}' > /data/yourbro/pages/hello/page.json
 ```
 
-Pages are private by default. Set `"public": true` in `page.json` to allow anonymous viewers. Private pages are only accessible to paired users.
+Pages have three access levels:
+
+- **Private** (default): Only paired users can view
+- **Shared**: Specific Google accounts + access code. Set `"allowed_emails"` in `page.json`:
+  ```bash
+  echo '{"title": "For Team", "allowed_emails": ["alice@company.com"]}' > /data/yourbro/pages/hello/page.json
+  ```
+  The agent auto-generates an `access_code` and logs it. Share the URL and code with invitees. Two factors are required: verified email (API-signed Ed25519 token) + access code (travels only inside E2E encrypted channel, server never sees it).
+- **Public**: Anyone with the link. Set `"public": true` in `page.json`.
 
 Page files live on your machine. To update, just edit the files — changes are live immediately. To delete:
 
@@ -275,6 +326,7 @@ Target: single VPS with Docker Compose (nginx + TLS, API, Postgres).
 | `GOOGLE_CLIENT_SECRET` | Google OAuth app secret |
 | `GOOGLE_REDIRECT_URL` | OAuth callback URL |
 | `FRONTEND_URL` | CORS allowed origin |
+| `IDENTITY_SIGNING_KEY` | Ed25519 private key for signing identity tokens (shared pages). Generate with `go run ./api/cmd/genkey` |
 
 ### Deploy
 
@@ -304,6 +356,9 @@ bash deploy/deploy.sh
 | GET | `/api/tokens` | Cookie | List API tokens |
 | DELETE | `/api/tokens/{id}` | Cookie | Revoke API token |
 | GET | `/api/page-analytics` | Cookie | Page view analytics |
+| GET | `/api/identity-token` | Cookie | Short-lived Ed25519-signed JWT with user's email (for shared pages) |
+| GET | `/.well-known/jwks.json` | — | Ed25519 public key for identity token verification (JWKS) |
+| GET | `/auth/bridge` | Cookie | Propagate session to custom domain (redirects to custom domain `/auth/session`) |
 
 ### Agent (reached via relay)
 
@@ -314,8 +369,8 @@ All agent endpoints are accessed through E2E encrypted relay only. There is no c
 | POST | `/api/pair` | E2E + Pairing code | Register browser's X25519 public key |
 | POST | `/api/auth-check` | Paired | Check if browser is paired (decryption = auth) |
 | POST | `/api/revoke-key` | Paired | Revoke browser's encryption key |
-| GET | `/api/pages` | Paired | List all pages (paired users only, anonymous get empty list) |
-| GET | `/api/page/{slug}` | Paired or public | Get page file bundle — paired users: any page; anonymous: public only |
+| GET | `/api/pages` | Paired | List all pages (with `shared` flag and `allowed_emails`) |
+| GET | `/api/page/{slug}` | Paired, shared, or public | Get page bundle. Returns specific errors: `login_required`, `email_not_allowed`, `access_code_required`, `invalid_access_code` |
 | POST | `/api/page-storage/get` | E2E relay | Get storage value |
 | POST | `/api/page-storage/set` | E2E relay | Set storage value |
 | POST | `/api/page-storage/delete` | E2E relay | Delete storage value |
