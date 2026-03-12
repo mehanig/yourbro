@@ -400,9 +400,23 @@
                 return Object.keys(h).length > 0 ? h : undefined;
             }
 
+            // Helper to parse error from agent response
+            function getAgentError(innerResp) {
+                if (!innerResp || !innerResp.body) return null;
+                try { return JSON.parse(innerResp.body).error || null; } catch(e) { return null; }
+            }
+
+            function showStatusMsg(title, subtitle) {
+                document.body.innerHTML = '<div class="status-msg">' + title +
+                    '<div class="subtitle">' + subtitle + '</div>' +
+                    (_debug ? '<pre style="font-size:11px;color:#555;margin-top:12px;text-align:left;max-width:400px;word-break:break-all">' + _dbg + '</pre>' : '') +
+                    '</div>';
+            }
+
             // 5. Fetch page bundle via E2E encrypted relay
             var currentAccessCode = await loadAccessCode();
             var pageData = null;
+            var lastError = null;
             var fetchAttempts = 0;
             var maxAttempts = 3;
 
@@ -417,29 +431,57 @@
                     });
                     if (innerResp && innerResp.status === 200 && innerResp.body) {
                         pageData = JSON.parse(innerResp.body);
-                        // Save working access code
                         if (currentAccessCode) await saveAccessCode(currentAccessCode);
+                        break;
                     }
+                    lastError = getAgentError(innerResp);
                 } catch(e) {
                     _dbg += 'E2E fetch error: ' + e.message + '\n';
                     console.error('E2E page fetch failed:', e);
                 }
 
-                // If page fetch failed and user is logged in, prompt for access code
-                if (!pageData && identityToken) {
-                    var errMsg = fetchAttempts > 1 ? 'Invalid code. Try again.' : null;
-                    currentAccessCode = await promptAccessCode(errMsg);
-                } else {
-                    break;
+                // Handle specific error states
+                if (lastError === 'login_required') {
+                    var loginUrl = (API || '') + '/auth/google';
+                    showStatusMsg(
+                        'Sign in to view this page.',
+                        '<a href="' + loginUrl + '" style="color:#3b82f6">Sign in with Google</a> to continue.'
+                    );
+                    return;
                 }
+
+                if (lastError === 'email_not_allowed') {
+                    showStatusMsg(
+                        'You don\'t have access to this page.',
+                        'The page owner has not granted access to your account.'
+                    );
+                    return;
+                }
+
+                // Access code required or invalid — prompt for code
+                if (lastError === 'access_code_required' || lastError === 'invalid_access_code') {
+                    var errMsg = lastError === 'invalid_access_code' ? 'Invalid code. Try again.' : null;
+                    currentAccessCode = await promptAccessCode(errMsg);
+                    continue;
+                }
+
+                // Any other error — stop retrying
+                break;
             }
 
             if (!pageData || !pageData.files || !pageData.files['index.html']) {
-                document.body.innerHTML = '<div class="status-msg">' +
-                    'This page is not available.' +
-                    '<div class="subtitle">The page may not exist or you may not have access.</div>' +
-                    (_debug ? '<pre style="font-size:11px;color:#555;margin-top:12px;text-align:left;max-width:400px;word-break:break-all">' + _dbg + '</pre>' : '') +
-                    '</div>';
+                if (identityToken) {
+                    showStatusMsg(
+                        'This page is not available for your account.',
+                        'The page may not exist or you may not have access.'
+                    );
+                } else {
+                    var loginUrl = (API || '') + '/auth/google';
+                    showStatusMsg(
+                        'This page is not available.',
+                        '<a href="' + loginUrl + '" style="color:#3b82f6">Sign in with Google</a> — logging in might help if you have access and the page exists.'
+                    );
+                }
                 return;
             }
 

@@ -202,11 +202,30 @@ func (h *PagesHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if len(meta.AllowedEmails) > 0 && meta.AccessCode != "" {
 		email := IdentityEmailFromRequest(r)
 		code := AccessCodeFromRequest(r)
-		if email != "" && meta.isEmailAllowed(email) &&
-			subtle.ConstantTimeCompare([]byte(code), []byte(meta.AccessCode)) == 1 {
+
+		// No identity token — viewer needs to log in
+		if email == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "login_required"})
+			return
+		}
+
+		// Email not in allowed list
+		if !meta.isEmailAllowed(email) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "email_not_allowed"})
+			return
+		}
+
+		// Email matches — check access code
+		if code == "" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "access_code_required"})
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(code), []byte(meta.AccessCode)) == 1 {
 			h.servePage(w, slug)
 			return
 		}
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid_access_code"})
+		return
 	}
 
 	// Tier 3: Public page -> anyone
