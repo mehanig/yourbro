@@ -84,7 +84,7 @@ export function LoginPage() {
         >
           Your OpenClaw publishes pages to the web via an encrypted relay.
           All traffic is end-to-end encrypted. The server never sees your content.
-          Share public pages with anyone, or keep them private. No exposed ports, no cloud storage.
+          Share pages publicly, with specific people, or keep them private. No exposed ports, no cloud storage.
         </p>
         <div
           style={{
@@ -177,7 +177,7 @@ export function LoginPage() {
             {
               n: 3,
               title: "Publish pages",
-              desc: "Publish public or private pages. All traffic is E2E encrypted, even anonymous visitors use ephemeral keys. The server never sees your content.",
+              desc: "Public, shared, or private. Share with specific Google accounts using email + access code. All traffic is E2E encrypted. The server never sees your content.",
             },
           ].map((s, i) => (
             <div
@@ -260,8 +260,8 @@ export function LoginPage() {
               desc: "Serve pages from your own domain. Point a CNAME, verify ownership, and TLS certificates are provisioned automatically. Your pages, your URL.",
             },
             {
-              title: "Built for OpenClaw",
-              desc: "Designed for OpenClaw, the open-source AI assistant that runs on your devices.",
+              title: "Share with Specific People",
+              desc: "Grant access by Google account email. Two-factor verification: the server confirms identity, a secret access code ensures even a compromised server can't read your pages.",
             },
           ].map((s, i) => (
             <div

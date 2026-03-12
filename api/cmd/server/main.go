@@ -126,6 +126,19 @@ func main() {
 	defer db.Close()
 
 	oauthCfg := auth.NewGoogleOAuthConfig()
+
+	// Initialize Ed25519 identity signer for shared page tokens (optional)
+	identitySigner, err := auth.NewIdentitySigner(os.Getenv("IDENTITY_SIGNING_KEY"))
+	if err != nil {
+		log.Fatalf("Invalid IDENTITY_SIGNING_KEY: %v", err)
+	}
+	if identitySigner != nil {
+		log.Printf("Identity signer initialized (kid=%s)", identitySigner.KeyID)
+	} else {
+		log.Printf("IDENTITY_SIGNING_KEY not set — identity tokens disabled")
+	}
+	identityHandler := &handlers.IdentityHandler{Signer: identitySigner, DB: db}
+
 	keysHandler := &handlers.KeysHandler{DB: db}
 
 	// Cloudflare client for Custom Hostnames (optional — nil in dev)
@@ -166,7 +179,8 @@ func main() {
 			}
 
 			// Known API hosts pass through to normal routing
-			if host == apiHost || host == "localhost" || host == "127.0.0.1" {
+			// "api" and "nginx" are Docker Compose service names used for internal requests
+			if host == apiHost || host == "localhost" || host == "127.0.0.1" || host == "api" || host == "nginx" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -232,6 +246,12 @@ func main() {
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+
+	// JWKS endpoint — public, no auth (agents fetch this to verify identity tokens)
+	r.Group(func(r chi.Router) {
+		r.Use(publicCORS)
+		r.Get("/.well-known/jwks.json", identityHandler.JWKS)
 	})
 
 	// ACME HTTP-01 challenge handler (autocert handles this via the main HTTP server)
@@ -465,6 +485,9 @@ func main() {
 	r.Route("/api", func(r chi.Router) {
 		r.Use(authCORS)
 		r.Use(middleware.RequireAuth(db))
+
+			// Identity token for shared page access (Ed25519-signed, 5-min expiry)
+			r.Get("/identity-token", identityHandler.GetToken)
 
 			// User info
 			r.Get("/me", func(w http.ResponseWriter, r *http.Request) {
