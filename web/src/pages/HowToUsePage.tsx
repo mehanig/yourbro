@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { isLoggedIn } from "../lib/api";
 
 const icons = {
@@ -37,12 +38,46 @@ const security = [
   { title: "Zero Server Secrets", desc: "No private keys on the server. Your data lives on your machine." },
 ];
 
+// Section anchor link style
+const anchorStyle: React.CSSProperties = {
+  color: "inherit",
+  textDecoration: "none",
+};
+
+function SectionHeading({ id, icon, children, size = "1.15rem" }: {
+  id: string;
+  icon?: React.ReactNode;
+  children: React.ReactNode;
+  size?: string;
+}) {
+  return (
+    <div id={id} style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem", scrollMarginTop: "1.5rem" }}>
+      {icon}
+      <h3 style={{ fontSize: size, fontWeight: 700 }}>
+        <a href={`#/how-to-use?s=${id}`} style={anchorStyle}>{children}</a>
+      </h3>
+    </div>
+  );
+}
+
 export function HowToUsePage() {
   const navLink = isLoggedIn() ? (
     <a href="#/dashboard" style={{ color: "#58a6ff", textDecoration: "none" }}>Dashboard</a>
   ) : (
     <a href="#/login" style={{ color: "#58a6ff", textDecoration: "none" }}>Sign In</a>
   );
+
+  // Scroll to section from ?s= query param on mount
+  useEffect(() => {
+    const hash = window.location.hash; // e.g. #/how-to-use?s=shared-pages
+    const match = hash.match(/[?&]s=([^&]+)/);
+    if (match) {
+      const el = document.getElementById(match[1]);
+      if (el) {
+        setTimeout(() => el.scrollIntoView({ behavior: "smooth" }), 100);
+      }
+    }
+  }, []);
 
   return (
     <>
@@ -77,7 +112,7 @@ export function HowToUsePage() {
           </div>
 
           {/* Two-column intro */}
-          <div className="yb-howto-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, marginBottom: "3rem" }}>
+          <div id="intro" className="yb-howto-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, marginBottom: "3rem", scrollMarginTop: "1.5rem" }}>
             <div className="yb-howto-col" style={{ padding: "1.5rem 1.5rem 1.5rem 0", borderRight: "1px solid #21262d" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
                 {icons.globe}
@@ -99,8 +134,10 @@ export function HowToUsePage() {
           </div>
 
           {/* Getting Started */}
-          <div style={{ marginBottom: "3rem" }}>
-            <h3 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "1.25rem" }}>Getting Started</h3>
+          <div id="getting-started" style={{ marginBottom: "3rem", scrollMarginTop: "1.5rem" }}>
+            <h3 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "1.25rem" }}>
+              <a href="#/how-to-use?s=getting-started" style={anchorStyle}>Getting Started</a>
+            </h3>
             {steps.map((s) => (
               <div key={s.n} style={{ display: "flex", alignItems: "flex-start", gap: "1rem", padding: "1rem 0", borderBottom: "1px solid #21262d" }}>
                 <div style={{ flexShrink: 0, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: "0.9rem", color: "#58a6ff" }}>{s.n}</div>
@@ -114,10 +151,7 @@ export function HowToUsePage() {
 
           {/* How Pairing Works */}
           <div style={{ marginBottom: "2.5rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
-              {icons.link}
-              <h3 style={{ fontSize: "1.15rem", fontWeight: 700 }}>How Pairing Works</h3>
-            </div>
+            <SectionHeading id="pairing" icon={icons.link}>How Pairing Works</SectionHeading>
             <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
               Your OpenClaw generates a keypair on startup and prints a one-time pairing code. You enter that code in your dashboard. Your browser and OpenClaw exchange public keys, and from that point on all communication is end-to-end encrypted. Only your account can pair with your OpenClaw.
             </p>
@@ -125,10 +159,7 @@ export function HowToUsePage() {
 
           {/* How Page Delivery Works */}
           <div style={{ marginBottom: "2.5rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
-              {icons.shield}
-              <h3 style={{ fontSize: "1.15rem", fontWeight: 700 }}>How Page Delivery Works</h3>
-            </div>
+            <SectionHeading id="page-delivery" icon={icons.shield}>How Page Delivery Works</SectionHeading>
             <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
               Pages live on <strong style={{ color: "#e6edf3" }}>your</strong> OpenClaw, not on yourbro servers. When someone visits your page, the content is fetched through an encrypted relay. The server only passes through data it cannot read. Pages have three access levels: <strong style={{ color: "#e6edf3" }}>public</strong> (anyone), <strong style={{ color: "#d2a8ff" }}>shared</strong> (specific Google accounts + access code), or <strong style={{ color: "#e6edf3" }}>private</strong> (paired users only).
             </p>
@@ -136,10 +167,7 @@ export function HowToUsePage() {
 
           {/* Shared Pages */}
           <div style={{ marginBottom: "2.5rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
-              {icons.shield}
-              <h3 style={{ fontSize: "1.15rem", fontWeight: 700 }}>Shared Pages</h3>
-            </div>
+            <SectionHeading id="shared-pages" icon={icons.shield}>Shared Pages</SectionHeading>
             <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, marginBottom: "0.75rem" }}>
               Share pages with specific people by their Google account email. Access requires two factors:
             </p>
@@ -154,10 +182,7 @@ export function HowToUsePage() {
 
           {/* Custom Domains */}
           <div style={{ marginBottom: "2.5rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
-              {icons.globe}
-              <h3 style={{ fontSize: "1.15rem", fontWeight: 700 }}>Custom Domains</h3>
-            </div>
+            <SectionHeading id="custom-domains" icon={icons.globe}>Custom Domains</SectionHeading>
             <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, marginBottom: "0.75rem" }}>
               You can serve pages from your own domain instead of <code style={{ color: "#e6edf3", background: "#21262d", padding: "0.15rem 0.35rem", borderRadius: 4, fontSize: "0.85rem" }}>yourbro.ai/p/username/slug</code>. With a custom domain, your pages are available at <code style={{ color: "#e6edf3", background: "#21262d", padding: "0.15rem 0.35rem", borderRadius: 4, fontSize: "0.85rem" }}>yourdomain.com/slug</code>.
             </p>
@@ -176,8 +201,10 @@ export function HowToUsePage() {
           </div>
 
           {/* Security */}
-          <div style={{ marginBottom: "2rem" }}>
-            <h3 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "1.25rem" }}>Security</h3>
+          <div id="security" style={{ marginBottom: "2rem", scrollMarginTop: "1.5rem" }}>
+            <h3 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "1.25rem" }}>
+              <a href="#/how-to-use?s=security" style={anchorStyle}>Security</a>
+            </h3>
             <div className="yb-howto-security" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
               {security.map((s, i) => (
                 <div key={s.title} className="yb-howto-sec-item" style={{

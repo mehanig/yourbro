@@ -341,14 +341,45 @@
 
             // 4. Fetch identity token (best-effort — fails silently for anonymous viewers)
             var identityToken = null;
-            try {
-                var idResp = await fetch((API || '') + '/api/identity-token', { credentials: 'include' });
-                if (idResp.ok) {
-                    var idData = await idResp.json();
-                    identityToken = idData.token;
+            var isCustomDomain = CUSTOM_DOMAIN_USER && CUSTOM_DOMAIN_USER.indexOf('/*') !== 0;
+            if (!isCustomDomain) {
+                // Same origin (yourbro.ai) — fetch directly
+                try {
+                    var idResp = await fetch((API || '') + '/api/identity-token', { credentials: 'include' });
+                    if (idResp.ok) {
+                        var idData = await idResp.json();
+                        identityToken = idData.token;
+                    }
+                } catch(e) {
+                    _dbg += 'identity-token fetch skipped: ' + e.message + '\n';
                 }
-            } catch(e) {
-                _dbg += 'identity-token fetch skipped: ' + e.message + '\n';
+            } else {
+                // Custom domain — session cookie lives on yourbro.ai, so use a
+                // hidden iframe bridge on yourbro.ai to fetch the token same-origin.
+                try {
+                    var bridgeOrigin = 'https://yourbro.ai';
+                    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+                        bridgeOrigin = location.origin;
+                    }
+                    identityToken = await new Promise(function(resolve) {
+                        var timeout = setTimeout(function() { resolve(null); }, 5000);
+                        function onMsg(event) {
+                            if (event.data && event.data.type === 'yourbro-identity') {
+                                clearTimeout(timeout);
+                                window.removeEventListener('message', onMsg);
+                                iframe.remove();
+                                resolve(event.data.token || null);
+                            }
+                        }
+                        window.addEventListener('message', onMsg);
+                        var iframe = document.createElement('iframe');
+                        iframe.style.display = 'none';
+                        iframe.src = bridgeOrigin + '/p/assets/identity-bridge.html';
+                        document.body.appendChild(iframe);
+                    });
+                } catch(e) {
+                    _dbg += 'identity-bridge failed: ' + e.message + '\n';
+                }
             }
 
             // Access code helpers — stored in IndexedDB per page (username/slug)
