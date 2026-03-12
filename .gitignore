@@ -20,3 +20,4 @@ api/cmd/server/migrations/*
 *.pem
 test-private.*
 agent/server
+.claude/settings.local.json
