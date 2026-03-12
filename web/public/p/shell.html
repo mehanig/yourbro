@@ -354,49 +354,17 @@
                     _dbg += 'identity-token fetch skipped: ' + e.message + '\n';
                 }
             } else {
-                // Custom domain — session cookie lives on yourbro.ai, so use a
-                // popup on api.yourbro.ai to fetch the token (first-party context).
-                // Cache the token in IndexedDB to avoid popup on every page load.
+                // Custom domain — session cookie may have been set via /auth/bridge.
+                // Try fetching identity token directly from the same custom domain.
+                // The custom domain routes through the same API server (CNAME).
                 try {
-                    // Check cache first (token valid for 5 min, cache for 4 min)
-                    var cached = await new Promise(function(res) {
-                        try {
-                            var tx = idb.transaction('access-codes', 'readonly');
-                            var req = tx.objectStore('access-codes').get('__identity_token__');
-                            req.onsuccess = function() { res(req.result || null); };
-                            req.onerror = function() { res(null); };
-                        } catch(e) { res(null); }
-                    });
-                    if (cached && cached.token && cached.exp > Date.now()) {
-                        identityToken = cached.token;
-                        _dbg += 'identity token from cache\n';
-                    } else {
-                        // Open popup to fetch token
-                        var bridgeUrl = API + '/identity-bridge.html?origin=' + encodeURIComponent(location.origin);
-                        identityToken = await new Promise(function(resolve) {
-                            var timeout = setTimeout(function() { resolve(null); }, 30000);
-                            function onMsg(event) {
-                                if (event.data && event.data.type === 'yourbro-identity') {
-                                    clearTimeout(timeout);
-                                    window.removeEventListener('message', onMsg);
-                                    resolve(event.data.token || null);
-                                }
-                            }
-                            window.addEventListener('message', onMsg);
-                            var w = 420, h = 320;
-                            var left = (screen.width - w) / 2, top = (screen.height - h) / 2;
-                            window.open(bridgeUrl, 'yourbro-identity', 'width=' + w + ',height=' + h + ',left=' + left + ',top=' + top);
-                        });
-                        // Cache token (4 min TTL, token itself lives 5 min)
-                        if (identityToken) {
-                            try {
-                                var tx = idb.transaction('access-codes', 'readwrite');
-                                tx.objectStore('access-codes').put({ token: identityToken, exp: Date.now() + 4 * 60 * 1000 }, '__identity_token__');
-                            } catch(e) {}
-                        }
+                    var idResp = await fetch('/api/identity-token', { credentials: 'include' });
+                    if (idResp.ok) {
+                        var idData = await idResp.json();
+                        identityToken = idData.token;
                     }
                 } catch(e) {
-                    _dbg += 'identity-bridge failed: ' + e.message + '\n';
+                    _dbg += 'identity-token fetch on custom domain: ' + e.message + '\n';
                 }
             }
 
@@ -491,11 +459,18 @@
 
                 // Handle specific error states
                 if (lastError === 'login_required') {
-                    var loginUrl = (API || '') + '/auth/google';
-                    showStatusMsg(
-                        'Sign in to view this page.',
-                        '<a href="' + loginUrl + '" style="color:#3b82f6">Sign in with Google</a> to continue.'
-                    );
+                    if (isCustomDomain) {
+                        // Redirect to auth bridge to set session on this custom domain
+                        var returnUrl = location.href;
+                        var bridgeUrl = API + '/auth/bridge?return=' + encodeURIComponent(returnUrl);
+                        location.href = bridgeUrl;
+                    } else {
+                        var loginUrl = (API || '') + '/auth/google';
+                        showStatusMsg(
+                            'Sign in to view this page.',
+                            '<a href="' + loginUrl + '" style="color:#3b82f6">Sign in with Google</a> to continue.'
+                        );
+                    }
                     return;
                 }
 

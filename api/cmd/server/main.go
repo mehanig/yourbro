@@ -43,9 +43,6 @@ var migrationFiles embed.FS
 //go:embed shell.html
 var shellHTML string
 
-//go:embed identity-bridge.html
-var identityBridgeHTML string
-
 func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	// Create tracking table
 	if _, err := pool.Exec(ctx, `
@@ -196,6 +193,39 @@ func main() {
 				return
 			}
 
+			// Pass through /api/ routes on custom domains (identity-token, etc.)
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Handle /auth/session — set session cookie on custom domain
+			if r.URL.Path == "/auth/session" {
+				code := r.URL.Query().Get("code")
+				returnPath := r.URL.Query().Get("return")
+				if code == "" || returnPath == "" {
+					http.Error(w, "missing parameters", http.StatusBadRequest)
+					return
+				}
+				// Validate the code (it's a session JWT)
+				if _, err := auth.ValidateSessionToken(code); err != nil {
+					http.Error(w, "invalid or expired code", http.StatusUnauthorized)
+					return
+				}
+				// Set session cookie on this custom domain (no Domain attr = exact host)
+				http.SetCookie(w, &http.Cookie{
+					Name:     "yb_session",
+					Value:    code,
+					Path:     "/",
+					HttpOnly: true,
+					Secure:   true,
+					SameSite: http.SameSiteLaxMode,
+					MaxAge:   7 * 24 * 60 * 60,
+				})
+				http.Redirect(w, r, returnPath, http.StatusTemporaryRedirect)
+				return
+			}
+
 			path := strings.TrimPrefix(r.URL.Path, "/")
 			path = strings.TrimSuffix(path, "/")
 			slug := path
@@ -256,32 +286,6 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(publicCORS)
 		r.Get("/.well-known/jwks.json", identityHandler.JWKS)
-	})
-
-	// Identity bridge for cross-domain shared page auth.
-	// Served on api.yourbro.ai so the session cookie (Domain: .yourbro.ai) is same-origin.
-	// Custom domain shells load this in a hidden iframe to fetch identity tokens.
-	// X-Frame-Options is set dynamically: only yourbro.ai and verified custom domains can embed it.
-	r.Get("/identity-bridge.html", func(w http.ResponseWriter, req *http.Request) {
-		referer := req.Header.Get("Referer")
-		allowed := false
-		if referer != "" {
-			if u, err := url.Parse(referer); err == nil {
-				host := u.Hostname()
-				if host == "yourbro.ai" || host == "localhost" || host == "127.0.0.1" {
-					allowed = true
-				} else if _, _, err := db.GetCustomDomainByHost(req.Context(), host); err == nil {
-					allowed = true
-				}
-			}
-		}
-		if !allowed {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "private, no-store")
-		w.Write([]byte(identityBridgeHTML))
 	})
 
 	// ACME HTTP-01 challenge handler (autocert handles this via the main HTTP server)
@@ -366,6 +370,17 @@ func main() {
 			}
 
 			http.SetCookie(w, sessionCookie(token, 7*24*60*60))
+
+			// Check if this login was initiated from a custom domain auth bridge
+			if bridgeCookie, err := r.Cookie("auth_bridge_return"); err == nil && bridgeCookie.Value != "" {
+				// Clear the bridge cookie
+				http.SetCookie(w, &http.Cookie{
+					Name: "auth_bridge_return", Value: "", Path: "/auth/google/callback", MaxAge: -1,
+				})
+				// Redirect back to the auth bridge with the return URL
+				http.Redirect(w, r, "/auth/bridge?return="+url.QueryEscape(bridgeCookie.Value), http.StatusTemporaryRedirect)
+				return
+			}
 
 			// Redirect to frontend — session is in httpOnly cookie, no token in URL
 			http.Redirect(w, r, frontendURL+"/#/callback", http.StatusTemporaryRedirect)
@@ -692,6 +707,71 @@ func main() {
 				r.Put("/{id}", customDomainsHandler.Update)
 				r.Delete("/{id}", customDomainsHandler.Delete)
 			})
+	})
+
+	// Auth bridge — propagates session to custom domains.
+	// Step 1: api.yourbro.ai/auth/bridge?return=https://clicktof.art/slug
+	//   → validates session, verifies return URL is a verified custom domain
+	//   → generates one-time code, redirects to custom domain
+	// Step 2: clicktof.art/auth/session?code=<code>&return=/slug
+	//   → handled by custom domain middleware below
+	//   → exchanges code for session, sets cookie, redirects to page
+	r.Get("/auth/bridge", func(w http.ResponseWriter, r *http.Request) {
+		returnURL := r.URL.Query().Get("return")
+		if returnURL == "" {
+			http.Error(w, "missing return parameter", http.StatusBadRequest)
+			return
+		}
+		parsed, err := url.Parse(returnURL)
+		if err != nil || parsed.Host == "" {
+			http.Error(w, "invalid return URL", http.StatusBadRequest)
+			return
+		}
+
+		// Verify session
+		cookie, err := r.Cookie("yb_session")
+		if err != nil || cookie.Value == "" {
+			// Not logged in — redirect to Google OAuth with return URL
+			state, _ := auth.GenerateRandomHex(16)
+			http.SetCookie(w, &http.Cookie{
+				Name: "oauth_state", Value: state,
+				Path: "/auth/google/callback", HttpOnly: true,
+				Secure: getEnv("COOKIE_DOMAIN", "") != "", SameSite: http.SameSiteLaxMode, MaxAge: 300,
+			})
+			// Store return URL in a cookie so callback can redirect back
+			http.SetCookie(w, &http.Cookie{
+				Name: "auth_bridge_return", Value: returnURL,
+				Path: "/auth/google/callback", HttpOnly: true,
+				Secure: getEnv("COOKIE_DOMAIN", "") != "", SameSite: http.SameSiteLaxMode, MaxAge: 300,
+			})
+			oauthURL := oauthCfg.AuthCodeURL(state, oauth2.SetAuthURLParam("prompt", "select_account"))
+			http.Redirect(w, r, oauthURL, http.StatusTemporaryRedirect)
+			return
+		}
+
+		claims, err := auth.ValidateSessionToken(cookie.Value)
+		if err != nil {
+			http.Error(w, "invalid session", http.StatusUnauthorized)
+			return
+		}
+
+		// Verify the return URL host is a verified custom domain
+		host := parsed.Hostname()
+		if _, _, err := db.GetCustomDomainByHost(r.Context(), host); err != nil {
+			http.Error(w, "not a verified custom domain", http.StatusForbidden)
+			return
+		}
+
+		// Generate one-time code (short-lived, ties session to custom domain)
+		code, err := auth.CreateSessionToken(claims.UserID)
+		if err != nil {
+			http.Error(w, "failed to create bridge code", http.StatusInternalServerError)
+			return
+		}
+
+		// Redirect to custom domain to set cookie
+		redirectURL := parsed.Scheme + "://" + parsed.Host + "/auth/session?code=" + url.QueryEscape(code) + "&return=" + url.QueryEscape(parsed.Path)
+		http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 	})
 
 	// Logout outside /api Route (no auth required, uses auth CORS)
