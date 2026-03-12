@@ -523,3 +523,27 @@ func (db *DB) RunMigrationSQL(ctx context.Context, version, sql string) error {
 	}
 	return nil
 }
+
+// RevokeSession stores a session token hash in the revocation list.
+func (db *DB) RevokeSession(ctx context.Context, tokenHash string, expiresAt time.Time) error {
+	_, err := db.Pool.Exec(ctx, `
+		INSERT INTO revoked_sessions (token_hash, expires_at) VALUES ($1, $2)
+		ON CONFLICT (token_hash) DO NOTHING
+	`, tokenHash, expiresAt)
+	return err
+}
+
+// IsSessionRevoked checks if a session token hash is in the revocation list.
+func (db *DB) IsSessionRevoked(ctx context.Context, tokenHash string) bool {
+	var exists bool
+	err := db.Pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM revoked_sessions WHERE token_hash = $1 AND expires_at > NOW())
+	`, tokenHash).Scan(&exists)
+	return err == nil && exists
+}
+
+// CleanExpiredRevocations removes expired entries from the revocation list.
+func (db *DB) CleanExpiredRevocations(ctx context.Context) error {
+	_, err := db.Pool.Exec(ctx, `DELETE FROM revoked_sessions WHERE expires_at <= NOW()`)
+	return err
+}

@@ -778,11 +778,29 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(authCORS)
 		r.Post("/api/logout", func(w http.ResponseWriter, r *http.Request) {
+			// Revoke the session token so it's invalid on all domains
+			if cookie, err := r.Cookie("yb_session"); err == nil && cookie.Value != "" {
+				tokenHash := auth.HashToken(cookie.Value)
+				if claims, err := auth.ValidateSessionToken(cookie.Value); err == nil {
+					_ = db.RevokeSession(r.Context(), tokenHash, claims.ExpiresAt.Time)
+				}
+			}
 			http.SetCookie(w, sessionCookie("", -1))
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"status":"ok"}`))
 		})
 	})
+
+	// Clean up expired session revocations every hour
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := db.CleanExpiredRevocations(context.Background()); err != nil {
+				log.Printf("Failed to clean expired revocations: %v", err)
+			}
+		}
+	}()
 
 	port := getEnv("PORT", "8080")
 	srv := &http.Server{

@@ -64,6 +64,12 @@ func RequireAuth(db *storage.DB) func(http.Handler) http.Handler {
 				http.Error(w, `{"error":"invalid session token"}`, http.StatusUnauthorized)
 				return
 			}
+			// Check if session was revoked (logout)
+			tokenHash := auth.HashToken(tokenStr)
+			if db.IsSessionRevoked(r.Context(), tokenHash) {
+				http.Error(w, `{"error":"session revoked"}`, http.StatusUnauthorized)
+				return
+			}
 			ctx := context.WithValue(r.Context(), UserIDKey, claims.UserID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
