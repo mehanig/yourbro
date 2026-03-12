@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body>
+<script>
+(function() {
+    fetch('/api/identity-token', { credentials: 'include' })
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(data) {
+            parent.postMessage({
+                type: 'yourbro-identity',
+                token: data && data.token ? data.token : null
+            }, '*');
+        })
+        .catch(function() {
+            parent.postMessage({ type: 'yourbro-identity', token: null }, '*');
+        });
+})();
+</script>
+</body>
+</html>

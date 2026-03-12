@@ -42,6 +42,9 @@ var migrationFiles embed.FS
 //go:embed shell.html
 var shellHTML string
 
+//go:embed identity-bridge.html
+var identityBridgeHTML string
+
 func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	// Create tracking table
 	if _, err := pool.Exec(ctx, `
@@ -252,6 +255,15 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(publicCORS)
 		r.Get("/.well-known/jwks.json", identityHandler.JWKS)
+	})
+
+	// Identity bridge for cross-domain shared page auth.
+	// Served on api.yourbro.ai so the session cookie (Domain: .yourbro.ai) is same-origin.
+	// Custom domain shells load this in a hidden iframe to fetch identity tokens.
+	r.Get("/identity-bridge.html", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Write([]byte(identityBridgeHTML))
 	})
 
 	// ACME HTTP-01 challenge handler (autocert handles this via the main HTTP server)
