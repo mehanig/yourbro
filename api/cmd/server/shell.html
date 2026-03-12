@@ -357,10 +357,10 @@
                 // Custom domain — session cookie lives on yourbro.ai, so use a
                 // hidden iframe bridge on yourbro.ai to fetch the token same-origin.
                 try {
-                    var bridgeOrigin = 'https://yourbro.ai';
-                    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-                        bridgeOrigin = location.origin;
-                    }
+                    // The bridge is a static page on yourbro.ai served from CDN (R2).
+                    // The session cookie (Domain: yourbro.ai) is available there.
+                    // The bridge fetches the identity token from api.yourbro.ai (same cookie domain).
+                    var bridgeUrl = 'https://yourbro.ai/p/identity-bridge.html';
                     identityToken = await new Promise(function(resolve) {
                         var timeout = setTimeout(function() { resolve(null); }, 5000);
                         function onMsg(event) {
@@ -374,7 +374,7 @@
                         window.addEventListener('message', onMsg);
                         var iframe = document.createElement('iframe');
                         iframe.style.display = 'none';
-                        iframe.src = bridgeOrigin + '/p/assets/identity-bridge.html';
+                        iframe.src = bridgeUrl;
                         document.body.appendChild(iframe);
                     });
                 } catch(e) {
