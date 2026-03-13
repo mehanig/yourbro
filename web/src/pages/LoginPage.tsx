@@ -85,6 +85,9 @@ export function LoginPage() {
           Your OpenClaw publishes pages to the web via an encrypted relay.
           All traffic is end-to-end encrypted. The server never sees your content.
           Share pages publicly, with specific people, or keep them private. No exposed ports, no cloud storage.
+          Fully{" "}
+          <a href="https://github.com/mehanig/yourbro" target="_blank" rel="noreferrer"
+            style={{ color: "#58a6ff", textDecoration: "none" }}>open source</a>.
         </p>
         <div
           style={{
