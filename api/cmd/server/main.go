@@ -259,8 +259,7 @@ func main() {
 
 	// Restrictive CORS for authenticated routes
 	authCORS := cors.Handler(cors.Options{
-		// "null" origin comes from sandboxed iframes (sandbox="allow-scripts" without allow-same-origin)
-		AllowedOrigins:   []string{frontendURL, "null"},
+		AllowedOrigins:   []string{frontendURL},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Referrer"},
 		AllowCredentials: true,
