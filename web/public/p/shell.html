@@ -362,6 +362,12 @@
                     if (idResp.ok) {
                         var idData = await idResp.json();
                         identityToken = idData.token;
+                    } else if (idResp.status === 401) {
+                        // No valid session on this custom domain — redirect to auth bridge
+                        // to propagate session from yourbro.ai (or trigger Google OAuth).
+                        var bridgeUrl = API + '/auth/bridge?return=' + encodeURIComponent(location.href);
+                        location.href = bridgeUrl;
+                        return;
                     }
                 } catch(e) {
                     _dbg += 'identity-token fetch on custom domain: ' + e.message + '\n';
