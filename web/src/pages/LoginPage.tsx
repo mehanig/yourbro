@@ -61,7 +61,7 @@ export function LoginPage() {
             maxWidth: 600,
           }}
         >
-          Ask your AI to make you a web page. It's live instantly.
+          Ask your OpenClaw to make you a web page. It's live instantly.
         </p>
         <img
           className="yb-hero-image"
@@ -170,7 +170,7 @@ export function LoginPage() {
             lineHeight: 1.6,
           }}
         >
-          Tell your AI what you need. It builds the page and publishes it. Here are some things people do:
+          Tell OpenClaw what you need. It builds the page and publishes it. Here are some things people do:
         </p>
         <div
           className="yb-usecases"
@@ -186,7 +186,7 @@ export function LoginPage() {
             {
               emoji: "\ud83d\udcca",
               title: "Live dashboards",
-              desc: "\"Monitor these 5 websites every 15 minutes, show me a status page.\" Your AI checks the URLs and updates the page automatically.",
+              desc: "\"Monitor these 5 websites every 15 minutes, show me a status page.\" Your OpenClaw checks the URLs and updates the page automatically.",
             },
             {
               emoji: "\ud83d\udcdd",
@@ -205,8 +205,8 @@ export function LoginPage() {
             },
             {
               emoji: "\ud83e\udde0",
-              title: "AI writes, you publish",
-              desc: "Just describe what you want. Your AI builds the HTML, CSS, JS \u2014 even interactive apps with charts and forms. One message, live page.",
+              title: "OpenClaw writes, you publish",
+              desc: "Just describe what you want. Your OpenClaw builds the HTML, CSS, JS \u2014 even interactive apps with charts and forms. One message, live page.",
             },
             {
               emoji: "\ud83d\udce6",
@@ -280,13 +280,13 @@ export function LoginPage() {
             },
             {
               n: 2,
-              title: "Connect your AI",
+              title: "Connect your OpenClaw",
               desc: "Install the yourbro skill on OpenClaw (your AI assistant). It connects automatically \u2014 no servers to set up.",
             },
             {
               n: 3,
               title: "Say what you need",
-              desc: "\"Make me a status page\" or \"summarize this article and publish it.\" Your AI builds it and it's live at yourbro.ai/p/you/page-name.",
+              desc: "\"Make me a status page\" or \"summarize this article and publish it.\" Your OpenClaw builds it and it's live at yourbro.ai/p/you/page-name.",
             },
           ].map((s, i) => (
             <div
@@ -362,7 +362,7 @@ export function LoginPage() {
             },
             {
               title: "No servers to manage",
-              desc: "Your AI connects outbound via WebSocket. No port forwarding, no public IP, no cloud hosting, no DNS configuration. It just works.",
+              desc: "Your OpenClaw connects outbound via WebSocket. No port forwarding, no public IP, no cloud hosting, no DNS configuration. It just works.",
             },
             {
               title: "Share how you want",
