@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { getPageDetailedAnalytics, type PageDetailedAnalytics } from "../lib/api";
 
@@ -11,6 +11,8 @@ export function AnalyticsModal({
 }) {
   const [data, setData] = useState<PageDetailedAnalytics | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     getPageDetailedAnalytics(slug)
@@ -20,14 +22,34 @@ export function AnalyticsModal({
       );
   }, [slug]);
 
-  // Close on Escape
   useEffect(() => {
+    previousFocus.current = document.activeElement as HTMLElement;
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
+    return () => {
+      document.removeEventListener("keydown", handler);
+      previousFocus.current?.focus();
+    };
   }, [onClose]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== "Tab" || !modalRef.current) return;
+    const focusable = modalRef.current.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, []);
 
   let lastViewed = "Never";
   if (data?.last_viewed_at) {
@@ -54,11 +76,15 @@ export function AnalyticsModal({
         onClick={(e) => {
           if (e.target === e.currentTarget) onClose();
         }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="yb-analytics-modal-title"
+        onKeyDown={handleKeyDown}
       >
-        <div className="yb-modal-card">
+        <div className="yb-modal-card" ref={modalRef}>
           <div className="yb-modal-header">
-            <h2>Analytics: {slug}</h2>
-            <button className="yb-modal-close" onClick={onClose}>
+            <h2 id="yb-analytics-modal-title">Analytics: {slug}</h2>
+            <button className="yb-modal-close" onClick={onClose} aria-label="Close" type="button">
               &times;
             </button>
           </div>
@@ -180,7 +206,7 @@ const modalStyles = `
     padding: 1.5rem !important;
     box-shadow: 0 16px 48px rgba(0,0,0,0.5) !important;
     color: #e6edf3 !important;
-    font-family: system-ui, -apple-system, sans-serif !important;
+    font-family: 'DM Sans', system-ui, -apple-system, sans-serif !important;
   }
   .yb-modal-header {
     display: flex !important;
@@ -190,7 +216,7 @@ const modalStyles = `
   }
   .yb-modal-header h2 {
     margin: 0 !important;
-    font-size: 1.05rem !important;
+    font-size: 1.15rem !important;
     font-weight: 700 !important;
     color: #e6edf3 !important;
   }
@@ -211,8 +237,8 @@ const modalStyles = `
     flex-wrap: wrap !important;
   }
   .yb-modal-stat-label { color: #656d76 !important; font-size: 0.8rem !important; margin-bottom: 0.15rem !important; }
-  .yb-modal-stat-value { font-size: 1.4rem !important; font-weight: 700 !important; color: #e6edf3 !important; }
-  .yb-modal-stat-value-sm { font-size: 0.95rem !important; font-weight: 600 !important; color: #8b949e !important; margin-top: 0.25rem !important; }
+  .yb-modal-stat-value { font-size: 1.5rem !important; font-weight: 700 !important; color: #e6edf3 !important; }
+  .yb-modal-stat-value-sm { font-size: 1rem !important; font-weight: 600 !important; color: #8b949e !important; margin-top: 0.25rem !important; }
   .yb-modal-section-title {
     font-size: 0.9rem !important;
     font-weight: 600 !important;

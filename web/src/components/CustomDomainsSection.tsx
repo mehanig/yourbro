@@ -96,6 +96,7 @@ export function CustomDomainsSection() {
         <input
           type="text"
           placeholder="pages.example.com"
+          aria-label="Custom domain"
           value={newDomain}
           onChange={(e) => setNewDomain(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
@@ -105,7 +106,7 @@ export function CustomDomainsSection() {
             fontSize: "0.85rem",
           }}
         />
-        <button className="yb-btn-secondary" onClick={handleAdd} disabled={adding}>
+        <button className="yb-btn-secondary" type="button" onClick={handleAdd} disabled={adding}>
           {adding ? "Adding..." : "Add Domain"}
         </button>
       </div>}
@@ -115,11 +116,11 @@ export function CustomDomainsSection() {
       {instructions && (
         <div style={{
           background: "#0d1117", border: "1px solid #30363d", borderRadius: 8,
-          padding: "0.75rem 1rem", marginBottom: "1rem", fontSize: "0.82rem", color: "#8b949e",
+          padding: "0.75rem 1rem", marginBottom: "1rem", fontSize: "0.85rem", color: "#8b949e",
         }}>
           <p style={{ marginBottom: "0.4rem", color: "#e6edf3", fontWeight: 600 }}>DNS Setup Required:</p>
-          <p style={{ fontFamily: "monospace", marginBottom: "0.25rem" }}>{instructions.cname}</p>
-          <p style={{ fontFamily: "monospace", marginBottom: "0.25rem" }}>{instructions.txt}</p>
+          <p style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace", marginBottom: "0.25rem" }}>{instructions.cname}</p>
+          <p style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace", marginBottom: "0.25rem" }}>{instructions.txt}</p>
           <p style={{ marginTop: "0.4rem", fontSize: "0.8rem" }}>{instructions.detail}</p>
         </div>
       )}
@@ -146,7 +147,7 @@ export function CustomDomainsSection() {
             </div>
             <div style={{ display: "flex", gap: "0.4rem" }}>
               {!d.verified && (
-                <button className="yb-btn-secondary" onClick={() => handleVerify(d.id)} style={{ fontSize: "0.78rem" }}>
+                <button className="yb-btn-secondary" onClick={() => handleVerify(d.id)} style={{ fontSize: "0.75rem" }}>
                   Verify
                 </button>
               )}
@@ -163,27 +164,28 @@ export function CustomDomainsSection() {
           )}
 
           {!d.verified && (
-            <div style={{ fontSize: "0.8rem", color: "#8b949e", fontFamily: "monospace" }}>
+            <div style={{ fontSize: "0.8rem", color: "#8b949e", fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
               TXT _yourbro.{d.domain} → yb-verify={d.verification_token}
             </div>
           )}
 
           {d.verified && (
-            <div style={{ display: "flex", gap: "0.4rem", alignItems: "center", fontSize: "0.82rem" }}>
+            <div style={{ display: "flex", gap: "0.4rem", alignItems: "center", fontSize: "0.85rem" }}>
               <span style={{ color: "#8b949e" }}>Default page:</span>
               <input
                 type="text"
                 placeholder="slug"
+                aria-label={`Default page slug for ${d.domain}`}
                 value={editSlug[d.id] ?? d.default_slug}
                 onChange={(e) => setEditSlug((s) => ({ ...s, [d.id]: e.target.value }))}
                 style={{
-                  width: 160, padding: "0.3rem 0.5rem", background: "#0d1117",
+                  width: 160, maxWidth: "100%", padding: "0.3rem 0.5rem", background: "#0d1117",
                   border: "1px solid #30363d", borderRadius: 4, color: "#e6edf3",
-                  fontSize: "0.82rem",
+                  fontSize: "0.85rem",
                 }}
               />
               {editSlug[d.id] !== undefined && editSlug[d.id] !== d.default_slug && (
-                <button className="yb-btn-secondary" onClick={() => handleSaveSlug(d.id)} style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem" }}>
+                <button className="yb-btn-secondary" onClick={() => handleSaveSlug(d.id)} style={{ fontSize: "0.75rem" }}>
                   Save
                 </button>
               )}

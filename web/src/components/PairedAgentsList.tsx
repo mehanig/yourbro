@@ -36,9 +36,11 @@ export function PairedAgentsList({
                   color: a.is_online ? "#3fb950" : "#656d76",
                   fontSize: "0.7rem",
                 }}
+                aria-hidden="true"
               >
                 {a.is_online ? "\u25CF" : "\u25CB"}
               </span>
+              <span className="yb-sr-only">{a.is_online ? "Online" : "Offline"}</span>
               <span style={{ fontWeight: 600 }}>{a.name || "unnamed"}</span>
               {isChecking && (
                 <span

@@ -83,7 +83,9 @@ export function PagesList({
                   background: "#3fb950",
                   flexShrink: 0,
                 }}
+                aria-hidden="true"
               />
+              <span className="yb-sr-only">Online</span>
               <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>
                 {ap.agent.name}
               </span>

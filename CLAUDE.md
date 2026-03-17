@@ -87,3 +87,27 @@ Individual assets (JS, CSS, etc.) are **never fetched over the network**. After 
 - **Pairing**: E2E encrypted using the agent's X25519 public key (available from the agent list before pairing). Pairing codes are one-time use, 5-minute expiry, max 5 attempts, constant-time comparison. Agent logs an E2E fingerprint for optional out-of-band verification.
 - **key_id transport**: The relay router injects `key_id` into request context (not HTTP headers) after E2E decryption. Handlers read it via `handlers.KeyIDFromRequest(r)`. This prevents header spoofing.
 - OAuth callback at `api.yourbro.ai/auth/google/callback`, redirects to `yourbro.ai/#/callback`
+
+## Design Context
+
+See `.impeccable.md` for the full design context. Key points:
+
+### Brand & Audience
+- **Users:** Technical early adopters (developers, power users) from the OpenClaw/AI-agent ecosystem.
+- **Personality:** Friendly, simple, secure. Approachable but trustworthy. Not intimidating, not dumbed down.
+- **Emotional goals:** Confidence & control > Delight & ease > Power & capability.
+- **References:** Vercel, Raycast (sleek dark UI, polished, purposeful). **Anti-references:** generic AI landing pages, gradient text, glassmorphism, emoji card grids.
+
+### Design Principles
+1. **Transparency builds trust.** Show encryption status, agent connectivity, relay state. Respect that users are technical.
+2. **Fewer elements, more meaning.** Every UI element earns its place. Density over empty space, never clutter.
+3. **Dark mode is the product.** The dark palette IS the identity. Design for it natively.
+4. **Instant feedback, zero friction.** Match the product's speed in the UI — fast loading states, purposeful transitions (0.15s).
+5. **Security is invisible when it works.** E2E encryption is the backbone but users shouldn't feel like they're in a security tool.
+
+### Technical Constraints
+- **Styling:** All inline React style objects + CSS-in-JS template strings. No external CSS files, no Tailwind, no component library. This is intentional.
+- **Color palette:** GitHub Dark — `#0d1117` (base), `#161b22` (surface), `#e6edf3` (text), `#58a6ff` (accent). Full palette in `.impeccable.md`.
+- **Typography:** `system-ui, -apple-system, sans-serif`. No web fonts.
+- **Responsive:** Single breakpoint at 700px. Mobile stacks to single column.
+- **Accessibility:** `:focus-visible` rings (#58a6ff), `.yb-sr-only` for screen reader text, `prefers-reduced-motion` respected, semantic HTML with ARIA where needed.

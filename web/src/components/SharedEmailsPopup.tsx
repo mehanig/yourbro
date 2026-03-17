@@ -29,6 +29,8 @@ export function SharedEmailsPopup({
   return (
     <div
       ref={ref}
+      role="list"
+      aria-label="Shared email addresses"
       style={{
         position: "absolute",
         top: "calc(100% + 4px)",
@@ -45,9 +47,9 @@ export function SharedEmailsPopup({
       <div
         style={{
           color: "#8b949e",
-          fontSize: "0.7rem",
+          fontSize: "0.75rem",
           marginBottom: 8,
-          lineHeight: 1.4,
+          lineHeight: 1.6,
         }}
       >
         You can only manage this list using your OpenClaw
@@ -55,6 +57,7 @@ export function SharedEmailsPopup({
       {emails.map((email) => (
         <div
           key={email}
+          role="listitem"
           style={{
             color: "#d2a8ff",
             fontSize: "0.8rem",

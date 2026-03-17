@@ -33,15 +33,16 @@ export function DashboardHeader({
             alt=""
             style={{ width: 36, height: "auto" }}
           />
-          <h1 style={{ fontSize: "1.5rem", fontWeight: 700, margin: 0 }}>
+          <h1 style={{ fontSize: "1.5rem", fontWeight: 700, letterSpacing: "-0.02em", margin: 0 }}>
             yourbro
           </h1>
         </a>
       </div>
       <div
+        className="yb-dash-header-right"
         style={{ display: "flex", alignItems: "center", gap: "1rem" }}
       >
-        <span style={{ color: "#656d76", fontSize: "0.9rem" }}>
+        <span className="yb-dash-header-email" style={{ color: "#656d76", fontSize: "0.9rem" }}>
           {user.email}
         </span>
         <a

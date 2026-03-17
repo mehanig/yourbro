@@ -74,19 +74,23 @@ export function PageCard({
             </span>
           ) : page.shared ? (
             <span style={{ position: "relative" }}>
-              <span
+              <button
+                type="button"
                 style={{
                   color: "#d2a8ff",
                   fontSize: "0.75rem",
                   background: "#2d1f3d",
-                  padding: "0.1rem 0.4rem",
+                  padding: "0.25rem 0.5rem",
                   borderRadius: 4,
                   cursor: "pointer",
+                  border: "none",
+                  fontFamily: "inherit",
                 }}
                 onClick={() => setShowEmails(!showEmails)}
+                aria-expanded={showEmails}
               >
                 shared ({emailCount})
-              </span>
+              </button>
               {showEmails && page.allowed_emails && (
                 <SharedEmailsPopup
                   emails={page.allowed_emails}
@@ -133,7 +137,7 @@ export function PageCard({
           {statsText ? ` \u00b7 ${statsText}` : ""}
         </div>
       </div>
-      <div style={{ display: "flex", gap: "0.4rem", flexShrink: 0 }}>
+      <div className="yb-page-actions" style={{ display: "flex", gap: "0.4rem", flexShrink: 0 }}>
         {page.public && (
           <button
             className="yb-btn-secondary"

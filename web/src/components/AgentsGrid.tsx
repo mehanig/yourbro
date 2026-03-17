@@ -46,7 +46,7 @@ export function AgentsGrid({
             color: "#656d76",
             fontSize: "0.85rem",
             margin: "-0.5rem 0 1rem",
-            lineHeight: 1.5,
+            lineHeight: 1.6,
           }}
         >
           Online agents that need pairing. Enter the code from your agent's

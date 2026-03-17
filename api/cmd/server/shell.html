@@ -4,9 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>yourbro</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #fafafa; }
+        body { font-family: 'DM Sans', system-ui, sans-serif; background: #0a0a0a; color: #fafafa; }
         .frame-container { width: 100%; height: 100vh; }
         iframe { width: 100%; height: 100%; border: none; }
         .status-msg {
@@ -23,7 +26,7 @@
         .code-prompt p { color: #888; font-size: 16px; margin-bottom: 16px; }
         .code-prompt input {
             background: #1a1a1a; border: 1px solid #333; color: #fafafa;
-            font-family: monospace; font-size: 24px; letter-spacing: 0.2em;
+            font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 24px; letter-spacing: 0.2em;
             text-transform: uppercase; padding: 12px 16px; text-align: center;
             width: 220px; border-radius: 6px; outline: none;
         }
@@ -226,7 +229,7 @@
                 }
             } catch(e) {
                 console.error('Key generation failed:', e);
-                document.body.innerHTML = '<div class="status-msg">Failed to initialize encryption keys.<div class="subtitle">' + e.message + '</div></div>';
+                showStatusMsg('Failed to initialize encryption keys.', e.message);
                 return;
             }
 
@@ -261,11 +264,10 @@
             }
 
             if (!agentUUID || !agentPubBytes) {
-                document.body.innerHTML = '<div class="status-msg">' +
-                    'This page is not available.' +
-                    '<div class="subtitle">The author\'s agent may be offline or the page doesn\'t exist.</div>' +
-                    (_debug ? '<pre style="font-size:11px;color:#555;margin-top:12px;text-align:left;max-width:400px;word-break:break-all">' + _dbg + '</pre>' : '') +
-                    '</div>';
+                showStatusMsg(
+                    'This page is not available.',
+                    'The author\'s agent may be offline or the page doesn\'t exist.'
+                );
                 return;
             }
 
@@ -286,7 +288,7 @@
                 );
             } catch(e) {
                 console.error('Key derivation failed:', e);
-                document.body.innerHTML = '<div class="status-msg">Encryption setup failed.<div class="subtitle">' + e.message + '</div></div>';
+                showStatusMsg('Encryption setup failed.', e.message);
                 return;
             }
 
@@ -398,13 +400,28 @@
                     document.body.innerHTML = '';
                     var div = document.createElement('div');
                     div.className = 'code-prompt';
-                    div.innerHTML = '<p>This page requires an access code.</p>' +
-                        '<input type="text" maxlength="8" placeholder="Enter code" autofocus>' +
-                        '<button>Submit</button>' +
-                        (errorMsg ? '<div class="error">' + errorMsg + '</div>' : '');
+                    var p = document.createElement('p');
+                    p.textContent = 'This page requires an access code.';
+                    div.appendChild(p);
+                    var input = document.createElement('input');
+                    input.type = 'text';
+                    input.maxLength = 8;
+                    input.placeholder = 'Enter code';
+                    input.setAttribute('aria-label', 'Access code');
+                    input.setAttribute('autocomplete', 'off');
+                    div.appendChild(input);
+                    var btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.textContent = 'Submit';
+                    div.appendChild(btn);
+                    if (errorMsg) {
+                        var err = document.createElement('div');
+                        err.className = 'error';
+                        err.setAttribute('role', 'alert');
+                        err.textContent = errorMsg;
+                        div.appendChild(err);
+                    }
                     document.body.appendChild(div);
-                    var input = div.querySelector('input');
-                    var btn = div.querySelector('button');
                     function submit() {
                         var val = input.value.trim().toUpperCase();
                         if (val) resolve(val);
@@ -429,11 +446,25 @@
                 try { return JSON.parse(innerResp.body).error || null; } catch(e) { return null; }
             }
 
-            function showStatusMsg(title, subtitle) {
-                document.body.innerHTML = '<div class="status-msg">' + title +
-                    '<div class="subtitle">' + subtitle + '</div>' +
-                    (_debug ? '<pre style="font-size:11px;color:#555;margin-top:12px;text-align:left;max-width:400px;word-break:break-all">' + _dbg + '</pre>' : '') +
-                    '</div>';
+            function showStatusMsg(title, subtitle, isHtml) {
+                document.body.innerHTML = '';
+                var wrap = document.createElement('div');
+                wrap.className = 'status-msg';
+                wrap.setAttribute('role', 'status');
+                var titleEl = document.createElement('div');
+                titleEl.textContent = title;
+                wrap.appendChild(titleEl);
+                var subEl = document.createElement('div');
+                subEl.className = 'subtitle';
+                if (isHtml) { subEl.innerHTML = subtitle; } else { subEl.textContent = subtitle; }
+                wrap.appendChild(subEl);
+                if (_debug) {
+                    var pre = document.createElement('pre');
+                    pre.style.cssText = 'font-size:11px;color:#555;margin-top:12px;text-align:left;max-width:400px;word-break:break-all';
+                    pre.textContent = _dbg;
+                    wrap.appendChild(pre);
+                }
+                document.body.appendChild(wrap);
             }
 
             // 5. Fetch page bundle via E2E encrypted relay
@@ -474,7 +505,8 @@
                         var loginUrl = (API || '') + '/auth/google';
                         showStatusMsg(
                             'Sign in to view this page.',
-                            '<a href="' + loginUrl + '" style="color:#3b82f6">Sign in with Google</a> to continue.'
+                            '<a href="' + encodeURI(loginUrl) + '" style="color:#3b82f6">Sign in with Google</a> to continue.',
+                            true
                         );
                     }
                     return;
@@ -509,7 +541,8 @@
                     var loginUrl = (API || '') + '/auth/google';
                     showStatusMsg(
                         'This page is not available.',
-                        '<a href="' + loginUrl + '" style="color:#3b82f6">Sign in with Google</a> — logging in might help if you have access and the page exists.'
+                        '<a href="' + encodeURI(loginUrl) + '" style="color:#3b82f6">Sign in with Google</a> — logging in might help if you have access and the page exists.',
+                        true
                     );
                 }
                 return;

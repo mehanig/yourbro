@@ -72,7 +72,8 @@ function PairForm({
           marginBottom: "0.5rem",
         }}
       >
-        <span style={{ color: "#e3b341", fontSize: "0.7rem" }}>{"\u25CF"}</span>
+        <span style={{ color: "#e3b341", fontSize: "0.7rem" }} aria-hidden="true">{"\u25CF"}</span>
+        <span className="yb-sr-only">Needs pairing</span>
         <span style={{ fontWeight: 600 }}>{agent.name || "unnamed"}</span>
         <span
           style={{
@@ -90,6 +91,7 @@ function PairForm({
         <input
           type="text"
           placeholder="Pairing code"
+          aria-label={`Pairing code for ${agent.name || "unnamed"}`}
           value={code}
           onChange={(e) => setCode(e.target.value)}
           style={{
@@ -99,11 +101,12 @@ function PairForm({
             border: "1px solid #21262d",
             color: "#e6edf3",
             borderRadius: 6,
-            fontFamily: "monospace",
+            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
             fontSize: "0.85rem",
           }}
         />
         <button
+          type="button"
           onClick={handlePair}
           style={{
             padding: "0.4rem 0.8rem",

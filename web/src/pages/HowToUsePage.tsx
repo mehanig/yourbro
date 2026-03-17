@@ -90,23 +90,25 @@ export function HowToUsePage() {
           .yb-howto-col:last-child{border-bottom:none;}
           .yb-howto-sec-item{border-right:none !important;border-bottom:1px solid #21262d !important;padding:1.25rem 0 !important;}
           .yb-howto-sec-item:last-child{border-bottom:none !important;}
+          .yb-howto-container{padding:1.5rem 1rem !important;}
         }
+        code{word-break:break-all;}
       `}</style>
-      <div style={{ maxWidth: 960, margin: "0 auto", padding: "2rem 1.5rem" }}>
+      <div className="yb-howto-container" style={{ maxWidth: 960, margin: "0 auto", padding: "2rem 1.5rem" }}>
         <header className="yb-howto-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2.5rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             <a href="#/" style={{ display: "flex", alignItems: "center", gap: "0.75rem", textDecoration: "none", color: "#e6edf3" }}>
               <img src="/yourbro_logo.png" alt="" style={{ width: 36, height: "auto" }} />
-              <h1 style={{ fontSize: "1.5rem", fontWeight: 700, margin: 0 }}>yourbro</h1>
+              <h1 style={{ fontSize: "1.5rem", fontWeight: 700, letterSpacing: "-0.02em", margin: 0 }}>yourbro</h1>
             </a>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>{navLink}</div>
         </header>
 
-        <article style={{ maxWidth: 740, margin: "0 auto" }}>
+        <main><article style={{ maxWidth: 740, margin: "0 auto" }}>
           <div style={{ textAlign: "center", marginBottom: "3.5rem", padding: "2rem 0" }}>
-            <h2 style={{ fontSize: "2.2rem", fontWeight: 800, marginBottom: "0.75rem" }}>How to Use</h2>
-            <p style={{ color: "#8b949e", fontSize: "1.1rem", maxWidth: 500, margin: "0 auto", lineHeight: 1.6 }}>
+            <h2 style={{ fontSize: "2rem", fontWeight: 800, letterSpacing: "-0.02em", marginBottom: "0.75rem" }}>How to Use</h2>
+            <p style={{ color: "#8b949e", fontSize: "1.15rem", maxWidth: 500, margin: "0 auto", lineHeight: 1.6 }}>
               Publish public, shared, or private pages via an encrypted relay. The server never sees your content.
             </p>
           </div>
@@ -116,18 +118,18 @@ export function HowToUsePage() {
             <div className="yb-howto-col" style={{ padding: "1.5rem 1.5rem 1.5rem 0", borderRight: "1px solid #21262d" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
                 {icons.globe}
-                <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>What is yourbro</h3>
+                <h3 style={{ fontSize: "1.15rem", fontWeight: 700 }}>What is yourbro</h3>
               </div>
-              <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
+              <p style={{ color: "#8b949e", fontSize: "1rem", lineHeight: 1.6 }}>
                 A zero-knowledge platform for publishing web pages. All traffic is end-to-end encrypted. Your OpenClaw connects via WebSocket, no exposed ports needed. The server never sees what you publish.
               </p>
             </div>
             <div className="yb-howto-col" style={{ padding: "1.5rem 0 1.5rem 1.5rem" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
                 {icons.bot}
-                <h3 style={{ fontSize: "1.1rem", fontWeight: 700 }}>What is OpenClaw</h3>
+                <h3 style={{ fontSize: "1.15rem", fontWeight: 700 }}>What is OpenClaw</h3>
               </div>
-              <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
+              <p style={{ color: "#8b949e", fontSize: "1rem", lineHeight: 1.6 }}>
                 An open-source personal AI assistant that runs on your devices. Connects via Telegram, WhatsApp, Discord, and more. yourbro gives it the ability to publish and manage web pages.
               </p>
             </div>
@@ -135,7 +137,7 @@ export function HowToUsePage() {
 
           {/* Getting Started */}
           <div id="getting-started" style={{ marginBottom: "3rem", scrollMarginTop: "1.5rem" }}>
-            <h3 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "1.25rem" }}>
+            <h3 style={{ fontSize: "1.15rem", fontWeight: 700, marginBottom: "1.25rem" }}>
               <a href="#/how-to-use?s=getting-started" style={anchorStyle}>Getting Started</a>
             </h3>
             {steps.map((s) => (
@@ -143,7 +145,7 @@ export function HowToUsePage() {
                 <div style={{ flexShrink: 0, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: "0.9rem", color: "#58a6ff" }}>{s.n}</div>
                 <div>
                   <div style={{ fontWeight: 600, marginBottom: "0.2rem" }}>{s.title}</div>
-                  <div style={{ color: "#8b949e", fontSize: "0.9rem", lineHeight: 1.55 }}>{s.desc}</div>
+                  <div style={{ color: "#8b949e", fontSize: "1rem", lineHeight: 1.6 }}>{s.desc}</div>
                 </div>
               </div>
             ))}
@@ -152,7 +154,7 @@ export function HowToUsePage() {
           {/* How Pairing Works */}
           <div style={{ marginBottom: "2.5rem" }}>
             <SectionHeading id="pairing" icon={icons.link}>How Pairing Works</SectionHeading>
-            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
+            <p style={{ color: "#8b949e", fontSize: "1rem", lineHeight: 1.6 }}>
               Your OpenClaw generates a keypair on startup and prints a one-time pairing code. You enter that code in your dashboard. Your browser and OpenClaw exchange public keys, and from that point on all communication is end-to-end encrypted. Only your account can pair with your OpenClaw.
             </p>
           </div>
@@ -160,7 +162,7 @@ export function HowToUsePage() {
           {/* How Page Delivery Works */}
           <div style={{ marginBottom: "2.5rem" }}>
             <SectionHeading id="page-delivery" icon={icons.shield}>How Page Delivery Works</SectionHeading>
-            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
+            <p style={{ color: "#8b949e", fontSize: "1rem", lineHeight: 1.6 }}>
               Pages live on <strong style={{ color: "#e6edf3" }}>your</strong> OpenClaw, not on yourbro servers. When someone visits your page, the content is fetched through an encrypted relay. The server only passes through data it cannot read. Pages have three access levels: <strong style={{ color: "#e6edf3" }}>public</strong> (anyone), <strong style={{ color: "#d2a8ff" }}>shared</strong> (specific Google accounts + access code), or <strong style={{ color: "#e6edf3" }}>private</strong> (paired users only).
             </p>
           </div>
@@ -168,14 +170,14 @@ export function HowToUsePage() {
           {/* Shared Pages */}
           <div style={{ marginBottom: "2.5rem" }}>
             <SectionHeading id="shared-pages" icon={icons.shield}>Shared Pages</SectionHeading>
-            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, marginBottom: "0.75rem" }}>
+            <p style={{ color: "#8b949e", fontSize: "1rem", lineHeight: 1.6, marginBottom: "0.75rem" }}>
               Share pages with specific people by their Google account email. Access requires two factors:
             </p>
-            <ol style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, paddingLeft: "1.25rem", margin: "0 0 0.75rem" }}>
+            <ol style={{ color: "#8b949e", fontSize: "1rem", lineHeight: 1.6, paddingLeft: "1.25rem", margin: "0 0 0.75rem" }}>
               <li style={{ marginBottom: "0.35rem" }}><strong style={{ color: "#e6edf3" }}>Email verification</strong> — the server confirms the viewer's Google identity via a signed token. This proves they own the email address.</li>
               <li style={{ marginBottom: "0.35rem" }}><strong style={{ color: "#e6edf3" }}>Access code</strong> — an 8-character code generated by your OpenClaw and shared out-of-band. This code travels only inside the E2E encrypted channel, so the server never sees it.</li>
             </ol>
-            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
+            <p style={{ color: "#8b949e", fontSize: "1rem", lineHeight: 1.6 }}>
               Both factors are required. Even if the server is compromised, an attacker cannot access shared pages without the access code. Ask your OpenClaw to set <code style={{ color: "#e6edf3", background: "#21262d", padding: "0.15rem 0.35rem", borderRadius: 4, fontSize: "0.85rem" }}>allowed_emails</code> in your page's configuration — it will generate an access code and log it for you to share.
             </p>
           </div>
@@ -183,26 +185,26 @@ export function HowToUsePage() {
           {/* Custom Domains */}
           <div style={{ marginBottom: "2.5rem" }}>
             <SectionHeading id="custom-domains" icon={icons.globe}>Custom Domains</SectionHeading>
-            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, marginBottom: "0.75rem" }}>
+            <p style={{ color: "#8b949e", fontSize: "1rem", lineHeight: 1.6, marginBottom: "0.75rem" }}>
               You can serve pages from your own domain instead of <code style={{ color: "#e6edf3", background: "#21262d", padding: "0.15rem 0.35rem", borderRadius: 4, fontSize: "0.85rem" }}>yourbro.ai/p/username/slug</code>. With a custom domain, your pages are available at <code style={{ color: "#e6edf3", background: "#21262d", padding: "0.15rem 0.35rem", borderRadius: 4, fontSize: "0.85rem" }}>yourdomain.com/slug</code>.
             </p>
-            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, marginBottom: "0.75rem" }}>
+            <p style={{ color: "#8b949e", fontSize: "1rem", lineHeight: 1.6, marginBottom: "0.75rem" }}>
               Setup takes a few minutes:
             </p>
-            <ol style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65, paddingLeft: "1.25rem", margin: "0 0 0.75rem" }}>
+            <ol style={{ color: "#8b949e", fontSize: "1rem", lineHeight: 1.6, paddingLeft: "1.25rem", margin: "0 0 0.75rem" }}>
               <li style={{ marginBottom: "0.35rem" }}>Add your domain in the dashboard.</li>
               <li style={{ marginBottom: "0.35rem" }}>Create a CNAME record pointing to <code style={{ color: "#e6edf3", background: "#21262d", padding: "0.15rem 0.35rem", borderRadius: 4, fontSize: "0.85rem" }}>custom.yourbro.ai</code> and a TXT record to verify ownership.</li>
               <li style={{ marginBottom: "0.35rem" }}>Click Verify. Once confirmed, a TLS certificate is provisioned automatically via Let's Encrypt.</li>
               <li style={{ marginBottom: "0.35rem" }}>Optionally set a default page to serve at the root of your domain.</li>
             </ol>
-            <p style={{ color: "#8b949e", fontSize: "0.92rem", lineHeight: 1.65 }}>
+            <p style={{ color: "#8b949e", fontSize: "1rem", lineHeight: 1.6 }}>
               No changes to your OpenClaw are needed. Custom domains use the same E2E encrypted relay as <code style={{ color: "#e6edf3", background: "#21262d", padding: "0.15rem 0.35rem", borderRadius: 4, fontSize: "0.85rem" }}>yourbro.ai</code>. The server still never sees your content.
             </p>
           </div>
 
           {/* Security */}
           <div id="security" style={{ marginBottom: "2rem", scrollMarginTop: "1.5rem" }}>
-            <h3 style={{ fontSize: "1.3rem", fontWeight: 700, marginBottom: "1.25rem" }}>
+            <h3 style={{ fontSize: "1.15rem", fontWeight: 700, marginBottom: "1.25rem" }}>
               <a href="#/how-to-use?s=security" style={anchorStyle}>Security</a>
             </h3>
             <div className="yb-howto-security" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
@@ -212,13 +214,13 @@ export function HowToUsePage() {
                   borderRight: i % 2 === 0 ? "1px solid #21262d" : undefined,
                   borderBottom: i < 2 ? "1px solid #21262d" : undefined,
                 }}>
-                  <div style={{ fontWeight: 600, fontSize: "0.95rem", marginBottom: "0.35rem" }}>{s.title}</div>
-                  <div style={{ color: "#8b949e", fontSize: "0.85rem", lineHeight: 1.55 }}>{s.desc}</div>
+                  <div style={{ fontWeight: 600, fontSize: "1rem", marginBottom: "0.35rem" }}>{s.title}</div>
+                  <div style={{ color: "#8b949e", fontSize: "0.85rem", lineHeight: 1.6 }}>{s.desc}</div>
                 </div>
               ))}
             </div>
           </div>
-        </article>
+        </article></main>
       </div>
     </>
   );
